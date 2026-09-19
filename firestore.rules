@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check authentication
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Fleet collection
+    match /fleet/{cabId} {
+      allow read, write: if true;
+    }
+
+    // Duties collection
+    match /duties/{dutyId} {
+      allow read, write: if true;
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+
+    // Location logs collection for date-wise billing reports
+    match /location_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    // Driver attendance collection for duty-based attendance punch
+    match /attendance/{attendanceId} {
+      allow read, write: if true;
+    }
+  }
+}

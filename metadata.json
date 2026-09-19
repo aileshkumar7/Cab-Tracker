@@ -1,0 +1,6 @@
+{
+  "name": "Cab Fleet Tracker",
+  "description": "Real-time fleet management system for internal transport operations with supervisor Admin Dashboard and mobile-optimized Driver Duty Screen.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
