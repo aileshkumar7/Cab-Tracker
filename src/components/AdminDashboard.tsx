@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   collection,
@@ -7,6 +7,9 @@ import {
   where,
   doc,
   setDoc,
+  updateDoc,
+  deleteDoc,
+  getDocs,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -57,6 +60,8 @@ import {
   Plus,
   UserCheck,
   ChevronRight,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -84,6 +89,13 @@ export const AdminDashboard: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | FleetCabStatus>('all');
   const [sortBy, setSortBy] = useState<'lastUpdated' | 'status' | 'cabNumber'>('lastUpdated');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Delete Cab State
+  const [cabToDelete, setCabToDelete] = useState<FleetCab | null>(null);
+  const [isDeletingCab, setIsDeletingCab] = useState(false);
+  const [unlinkDriversOnCabDelete, setUnlinkDriversOnCabDelete] = useState(true);
+  const [deleteDriversOnCabDelete, setDeleteDriversOnCabDelete] = useState(false);
+  const recentlyDeletedCabsRef = useRef<Set<string>>(new Set());
 
   // Automatic Cab Tracking & Map Focus State
   const [focusedCabNumber, setFocusedCabNumber] = useState<string | null>(null);
@@ -195,6 +207,8 @@ export const AdminDashboard: React.FC = () => {
     for (const driver of driverUsers) {
       if (driver.cabNumber && driver.cabNumber.trim() !== '') {
         const normCab = driver.cabNumber.trim().toUpperCase();
+        // Skip if this cab was recently deleted by the admin
+        if (recentlyDeletedCabsRef.current.has(normCab)) continue;
         if (!existingCabs.has(normCab)) {
           existingCabs.add(normCab); // avoid multiple calls in same cycle
           const cleanDocId = 'cab_' + normCab.replace(/[^A-Z0-9]/g, '_').toLowerCase();
@@ -244,6 +258,61 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setIsClearing(false);
       setTimeout(() => setActionSuccessMsg(null), 5000);
+    }
+  };
+
+  const handleConfirmDeleteCab = async () => {
+    if (!cabToDelete) return;
+    setIsDeletingCab(true);
+    const normCab = cabToDelete.cabNumber.trim().toUpperCase();
+    recentlyDeletedCabsRef.current.add(normCab);
+
+    try {
+      // 1. Delete fleet document(s)
+      if (cabToDelete.id) {
+        await deleteDoc(doc(db, 'fleet', cabToDelete.id));
+      }
+      const cleanDocId = 'cab_' + normCab.replace(/[^A-Z0-9]/g, '_').toLowerCase();
+      if (cleanDocId !== cabToDelete.id) {
+        await deleteDoc(doc(db, 'fleet', cleanDocId)).catch(() => {});
+      }
+
+      // 2. Handle linked driver user accounts in "users" collection
+      if (unlinkDriversOnCabDelete || deleteDriversOnCabDelete) {
+        const driversQuery = query(collection(db, 'users'), where('cabNumber', '==', normCab));
+        const snap = await getDocs(driversQuery);
+        for (const userDoc of snap.docs) {
+          if (deleteDriversOnCabDelete) {
+            await deleteDoc(userDoc.ref);
+          } else if (unlinkDriversOnCabDelete) {
+            await updateDoc(userDoc.ref, {
+              cabNumber: '',
+              driverSlot: null,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      // 3. Clean up any active/pending duties for this cab
+      try {
+        const dutiesQuery = query(collection(db, 'duties'), where('cabNumber', '==', normCab));
+        const dutiesSnap = await getDocs(dutiesQuery);
+        for (const dutyDoc of dutiesSnap.docs) {
+          await deleteDoc(dutyDoc.ref).catch(() => {});
+        }
+      } catch (e) {
+        // duties cleanup is best-effort
+      }
+
+      setActionSuccessMsg(`Cab ${normCab} was successfully deleted from the fleet.`);
+      setCabToDelete(null);
+      setTimeout(() => setActionSuccessMsg(null), 5000);
+    } catch (err: any) {
+      console.error('Failed to delete cab:', err);
+      alert('Failed to delete cab: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsDeletingCab(false);
     }
   };
 
@@ -1107,7 +1176,7 @@ export const AdminDashboard: React.FC = () => {
                       </th>
 
                       {/* Column: Action */}
-                      <th className="py-3.5 px-4 font-bold text-right">Live GPS Tracking</th>
+                      <th className="py-3.5 px-4 font-bold text-right">Actions & Tracking</th>
                     </tr>
                   </thead>
 
@@ -1358,14 +1427,14 @@ export const AdminDashboard: React.FC = () => {
                             </div>
                           </td>
 
-                          {/* Action Button: "Focus Map" button */}
+                          {/* Action Button: "Focus Map" button & "Delete Cab" button */}
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 type="button"
                                 id={`btn-focus-cab-${cab.cabNumber.replace(/[^A-Z0-9]/gi, '-').toLowerCase()}`}
                                 onClick={() => handleFocusCabOnMap(cab)}
-                                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 ml-auto border ${
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 border ${
                                   focusedCabNumber === cab.cabNumber
                                     ? 'bg-cyan-600 text-white border-cyan-700 ring-2 ring-cyan-400/30 font-black'
                                     : 'bg-cyan-50 hover:bg-cyan-100 text-cyan-900 border border-cyan-300'
@@ -1374,6 +1443,16 @@ export const AdminDashboard: React.FC = () => {
                               >
                                 <Crosshair className={`w-3.5 h-3.5 ${focusedCabNumber === cab.cabNumber ? 'text-white animate-spin' : 'text-cyan-700'}`} style={{ animationDuration: '4s' }} />
                                 <span>{focusedCabNumber === cab.cabNumber ? 'Tracking Live' : 'Focus Map'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                id={`btn-delete-cab-${cab.cabNumber.replace(/[^A-Z0-9]/gi, '-').toLowerCase()}`}
+                                onClick={() => setCabToDelete(cab)}
+                                className="p-1.5 rounded-xl font-bold text-xs transition flex items-center justify-center cursor-pointer shadow-xs active:scale-95 border bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300"
+                                title={`Delete Cab ${cab.cabNumber} from fleet`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>
@@ -1510,6 +1589,146 @@ export const AdminDashboard: React.FC = () => {
                   <Trash2 className="w-3.5 h-3.5" />
                 )}
                 <span>{isClearing ? 'Purging Database...' : 'Yes, Purge Dummy Data'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Single Cab Confirmation Modal */}
+      {cabToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-xs">
+          <div className="bg-white border-2 border-rose-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-[#1c1917] animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-[#e6e0d4] pb-3">
+              <div className="flex items-center gap-2 text-rose-700">
+                <div className="p-2 rounded-xl bg-rose-100 border border-rose-300">
+                  <Trash2 className="w-5 h-5 text-rose-700" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1c1917]">Delete Cab from Fleet</h3>
+                  <p className="text-[11px] text-[#78716c]">Permanent vehicle removal</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCabToDelete(null)}
+                disabled={isDeletingCab}
+                className="p-1.5 rounded-lg text-[#78716c] hover:text-[#1c1917] hover:bg-[#f5f0e6] transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Cab Details Summary Card */}
+            <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-rose-900">Cab Registration:</span>
+                <span className="font-mono font-bold text-sm px-2 py-0.5 rounded bg-white border border-rose-300 text-rose-900">
+                  {cabToDelete.cabNumber}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-rose-900">Vehicle Type:</span>
+                <span className="text-[#1c1917]">{cabToDelete.vehicleType || 'Sedan'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-rose-900">Base Hub / Site:</span>
+                <span className="text-[#1c1917]">{cabToDelete.baseHub || cabToDelete.site || 'North Terminal Hub'}</span>
+              </div>
+              {(cabToDelete.firstDriverName || cabToDelete.driverName) && (
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-rose-900">1st Driver (Day):</span>
+                  <span className="text-[#1c1917] font-medium">
+                    {cabToDelete.firstDriverName || cabToDelete.driverName}{' '}
+                    <span className="text-[#78716c] font-mono text-[11px]">
+                      ({cabToDelete.firstDriverPhone || cabToDelete.driverPhone || '—'})
+                    </span>
+                  </span>
+                </div>
+              )}
+              {cabToDelete.secondDriverName && (
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-rose-900">2nd Driver (Night):</span>
+                  <span className="text-[#1c1917] font-medium">
+                    {cabToDelete.secondDriverName}{' '}
+                    <span className="text-[#78716c] font-mono text-[11px]">({cabToDelete.secondDriverPhone || '—'})</span>
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Warning: This action cannot be undone.</p>
+                <p className="text-[11px] text-[#78716c] mt-0.5">
+                  This cab will be permanently removed from the active fleet and live GPS tracking map.
+                </p>
+              </div>
+            </div>
+
+            {/* Driver accounts handling options */}
+            {(cabToDelete.firstDriverName || cabToDelete.driverName || cabToDelete.secondDriverName) && (
+              <div className="space-y-2 bg-[#faf7f2] p-3 rounded-xl border border-[#ded7c8] text-xs">
+                <p className="font-bold text-[#57534e]">Driver Accounts Associated With This Cab:</p>
+
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={unlinkDriversOnCabDelete && !deleteDriversOnCabDelete}
+                    disabled={deleteDriversOnCabDelete}
+                    onChange={(e) => setUnlinkDriversOnCabDelete(e.target.checked)}
+                    className="rounded border-[#ded7c8] text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span>
+                    Keep driver accounts active (mark them as awaiting new cab reassignment)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer select-none text-rose-800">
+                  <input
+                    type="checkbox"
+                    checked={deleteDriversOnCabDelete}
+                    onChange={(e) => {
+                      setDeleteDriversOnCabDelete(e.target.checked);
+                      if (e.target.checked) setUnlinkDriversOnCabDelete(true);
+                    }}
+                    className="rounded border-[#ded7c8] text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span className="font-semibold">
+                    Also permanently delete assigned driver accounts from user database
+                  </span>
+                </label>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e6e0d4]">
+              <button
+                type="button"
+                onClick={() => setCabToDelete(null)}
+                disabled={isDeletingCab}
+                className="px-4 py-2 rounded-xl text-[#78716c] hover:bg-[#f5f0e6] font-semibold text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-delete-cab"
+                onClick={handleConfirmDeleteCab}
+                disabled={isDeletingCab}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingCab ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting Cab...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Cab</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

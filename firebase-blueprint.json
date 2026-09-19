@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role, contact, assigned cab and shift",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "driver", "supervisor", "site_supervisor"] },
+        "cabNumber": { "type": "string" },
+        "site": { "type": "string" },
+        "shift": { "type": "string", "enum": ["morning_12h", "night_12h"] },
+        "driverSlot": { "type": "string", "enum": ["first", "second"] },
+        "temporaryPassword": { "type": "string" }
+      },
+      "required": ["role"]
+    },
+    "FleetCab": {
+      "title": "FleetCab",
+      "description": "Fleet vehicle with driver assignment and live status",
+      "type": "object",
+      "properties": {
+        "cabNumber": { "type": "string" },
+        "site": { "type": "string" },
+        "driverName": { "type": "string" },
+        "driverPhone": { "type": "string" },
+        "firstDriverName": { "type": "string" },
+        "firstDriverPhone": { "type": "string" },
+        "firstDriverShift": { "type": "string" },
+        "secondDriverName": { "type": "string" },
+        "secondDriverPhone": { "type": "string" },
+        "secondDriverShift": { "type": "string" },
+        "activeDriverSlot": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "baseHub": { "type": "string" },
+        "status": { "type": "string" },
+        "currentLocationText": { "type": "string" },
+        "currentLocationLat": { "type": "number" },
+        "currentLocationLng": { "type": "number" }
+      },
+      "required": ["cabNumber"]
+    },
+    "Duty": {
+      "title": "Duty",
+      "description": "Assigned duty route and trip information",
+      "type": "object",
+      "properties": {
+        "cabNumber": { "type": "string" },
+        "driverId": { "type": "string" },
+        "startLocation": { "type": "string" },
+        "endLocation": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["cabNumber"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Registered driver and supervisor user profiles"
+    },
+    "/fleet/{cabId}": {
+      "schema": "FleetCab",
+      "description": "Fleet vehicles and real-time location records"
+    },
+    "/duties/{dutyId}": {
+      "schema": "Duty",
+      "description": "Trip and duty allocations"
+    }
+  }
+}

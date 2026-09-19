@@ -3,6 +3,7 @@ import {
   doc,
   updateDoc,
   setDoc,
+  deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -23,6 +24,7 @@ import {
   RefreshCw,
   Smartphone,
   Edit2,
+  Trash2,
   X,
   Check,
 } from 'lucide-react';
@@ -54,6 +56,11 @@ export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
   const [shiftInput, setShiftInput] = useState<'morning_12h' | 'night_12h'>('morning_12h');
   const [isSaving, setIsSaving] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+
+  // Delete Driver Modal State
+  const [driverToDelete, setDriverToDelete] = useState<UserProfile | null>(null);
+  const [isDeletingDriver, setIsDeletingDriver] = useState(false);
+  const [unassignFromCabOnDelete, setUnassignFromCabOnDelete] = useState(true);
 
   const existingCabNumbers = new Set(fleetList.map((c) => c.cabNumber.trim().toUpperCase()));
 
@@ -175,6 +182,59 @@ export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
       setAssignError(err.message || 'Failed to save cab assignment.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleConfirmDeleteDriver = async () => {
+    if (!driverToDelete) return;
+    setIsDeletingDriver(true);
+    try {
+      // If unassign is selected and driver is linked to a cab in fleet
+      if (unassignFromCabOnDelete && driverToDelete.cabNumber) {
+        const normCab = driverToDelete.cabNumber.trim().toUpperCase();
+        const matchedCab = fleetList.find((c) => c.cabNumber.trim().toUpperCase() === normCab);
+        if (matchedCab && matchedCab.id) {
+          const updates: Partial<FleetCab> = {};
+          if (
+            matchedCab.firstDriverPhone === driverToDelete.phoneNumber ||
+            matchedCab.firstDriverName === driverToDelete.name
+          ) {
+            updates.firstDriverName = '';
+            updates.firstDriverPhone = '';
+          }
+          if (
+            matchedCab.secondDriverPhone === driverToDelete.phoneNumber ||
+            matchedCab.secondDriverName === driverToDelete.name
+          ) {
+            updates.secondDriverName = '';
+            updates.secondDriverPhone = '';
+          }
+          if (
+            matchedCab.driverPhone === driverToDelete.phoneNumber ||
+            matchedCab.driverName === driverToDelete.name
+          ) {
+            updates.driverName = updates.firstDriverName || updates.secondDriverName || 'Driver';
+            updates.driverPhone = updates.firstDriverPhone || updates.secondDriverPhone || '';
+          }
+          await updateDoc(doc(db, 'fleet', matchedCab.id), {
+            ...updates,
+            lastUpdated: serverTimestamp(),
+          });
+        }
+      }
+
+      // Delete user document from Firestore "users" collection
+      await deleteDoc(doc(db, 'users', driverToDelete.uid));
+      setSuccessToast(
+        `Driver account "${driverToDelete.name || driverToDelete.phoneNumber || 'Driver'}" was deleted successfully.`
+      );
+      setDriverToDelete(null);
+      setTimeout(() => setSuccessToast(null), 5000);
+    } catch (err: any) {
+      console.error('Failed to delete driver:', err);
+      alert('Failed to delete driver: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsDeletingDriver(false);
     }
   };
 
@@ -474,15 +534,28 @@ export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
 
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
-                        <button
-                          type="button"
-                          id={`btn-assign-cab-${driver.uid}`}
-                          onClick={() => openAssignModal(driver)}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-[11px] transition shadow-xs flex items-center gap-1 ml-auto cursor-pointer"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          <span>{hasCab ? 'Change Cab' : 'Assign Cab'}</span>
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            id={`btn-assign-cab-${driver.uid}`}
+                            onClick={() => openAssignModal(driver)}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-[11px] transition shadow-xs flex items-center gap-1 cursor-pointer"
+                            title={hasCab ? 'Change Cab Assignment' : 'Assign Cab'}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>{hasCab ? 'Change Cab' : 'Assign Cab'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            id={`btn-delete-driver-${driver.uid}`}
+                            onClick={() => setDriverToDelete(driver)}
+                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 transition shadow-xs flex items-center justify-center cursor-pointer active:scale-95"
+                            title="Delete Driver Account"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -590,6 +663,108 @@ export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Driver Confirmation Modal */}
+      {driverToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-xs">
+          <div className="bg-white border-2 border-rose-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-[#1c1917] animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-[#e6e0d4] pb-3">
+              <div className="flex items-center gap-2 text-rose-700">
+                <div className="p-2 rounded-xl bg-rose-100 border border-rose-300">
+                  <Trash2 className="w-5 h-5 text-rose-700" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1c1917]">Delete Driver Account</h3>
+                  <p className="text-[11px] text-[#78716c]">Permanent account removal</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDriverToDelete(null)}
+                disabled={isDeletingDriver}
+                className="p-1.5 rounded-lg text-[#78716c] hover:text-[#1c1917] hover:bg-[#f5f0e6] transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-rose-900">Driver Name:</span>
+                <span className="font-bold text-[#1c1917]">{driverToDelete.name || 'Unnamed Driver'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-rose-900">Mobile Number:</span>
+                <span className="font-mono text-[#1c1917] font-semibold">{driverToDelete.phoneNumber || '—'}</span>
+              </div>
+              {driverToDelete.cabNumber && (
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-rose-900">Currently Assigned Cab:</span>
+                  <span className="font-mono font-bold px-2 py-0.5 rounded bg-white border border-rose-300 text-rose-900">
+                    {driverToDelete.cabNumber}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-rose-900">Site / Base:</span>
+                <span className="text-[#1c1917]">{driverToDelete.site || currentSupervisorSite || 'North Terminal Hub'}</span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Warning: This action cannot be undone.</p>
+                <p className="text-[11px] text-[#78716c] mt-0.5">
+                  The driver will lose login access, mobile tracking privileges, and their account will be permanently deleted from the database.
+                </p>
+              </div>
+            </div>
+
+            {driverToDelete.cabNumber && (
+              <label className="flex items-center gap-2 text-xs text-[#57534e] cursor-pointer select-none bg-[#faf7f2] p-2.5 rounded-xl border border-[#ded7c8]">
+                <input
+                  type="checkbox"
+                  checked={unassignFromCabOnDelete}
+                  onChange={(e) => setUnassignFromCabOnDelete(e.target.checked)}
+                  className="rounded border-[#ded7c8] text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                />
+                <span>Also unassign this driver from Cab <strong className="font-mono">{driverToDelete.cabNumber}</strong> in live fleet</span>
+              </label>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e6e0d4]">
+              <button
+                type="button"
+                onClick={() => setDriverToDelete(null)}
+                disabled={isDeletingDriver}
+                className="px-4 py-2 rounded-xl text-[#78716c] hover:bg-[#f5f0e6] font-semibold text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-delete-driver"
+                onClick={handleConfirmDeleteDriver}
+                disabled={isDeletingDriver}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingDriver ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Driver</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
