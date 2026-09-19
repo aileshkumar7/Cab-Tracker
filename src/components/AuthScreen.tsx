@@ -94,10 +94,8 @@ export const AuthScreen: React.FC = () => {
         return;
       }
       if (role === 'driver') {
-        if (!cabNumber.trim()) {
-          setFormMsg('Please enter your Cab Number to register your driver account.');
-          return;
-        }
+        // Phone number is required for driver account creation via mobile
+        // Cab number is optional - if provided, driver and cab are instantly linked in admin dashboard
       } else {
         if (!emailOrPhone.trim()) {
           setFormMsg('Please enter your email address.');
@@ -435,10 +433,10 @@ export const AuthScreen: React.FC = () => {
                     <label className="block text-xs font-bold text-[#44403c] mb-1.5 flex items-center justify-between">
                       <span className="flex items-center gap-1.5 text-amber-950">
                         <Car className="w-3.5 h-3.5 text-amber-600" />
-                        Cab Number *
+                        Assigned Cab Number
                       </span>
                       <span className="text-[10px] text-amber-800 font-mono font-bold bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">
-                        Your Login ID
+                        Cab or Mobile ID
                       </span>
                     </label>
                     <div className="relative">
@@ -448,13 +446,12 @@ export const AuthScreen: React.FC = () => {
                         type="text"
                         value={cabNumber}
                         onChange={(e) => setCabNumber(e.target.value.toUpperCase())}
-                        placeholder="e.g. HR55BD0168 or KA01AB1024"
+                        placeholder="e.g. HR55BD0168 or leave blank if pending"
                         className="w-full bg-amber-50/40 border-2 border-amber-300 rounded-xl pl-10 pr-4 py-2.5 text-sm font-bold text-[#1c1917] font-mono placeholder-[#a8a29e] focus:outline-none focus:border-amber-500 focus:bg-white transition uppercase"
-                        required={mode === 'register' && role === 'driver'}
                       />
                     </div>
                     <p className="text-[11px] text-amber-800 mt-1 font-medium">
-                      Drivers will use this Cab Number and password to log in anytime.
+                      Enter your cab number to auto-link your vehicle. You can log in using either your Cab Number or Mobile Number!
                     </p>
                   </div>
                 )}

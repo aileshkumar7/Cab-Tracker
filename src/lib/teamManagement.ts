@@ -200,6 +200,30 @@ export async function createTeamMemberAccount({
             updatePayload.site = cleanSite;
           }
           await setDoc(cabRef, sanitizeFirestoreData(updatePayload), { merge: true });
+        } else {
+          // Cab does not exist yet in fleet collection: Create it so it immediately appears in Admin Dashboard
+          const cleanDocId = 'cab_' + cleanCab.replace(/[^A-Z0-9]/g, '_').toLowerCase();
+          const cabRef = doc(db, 'fleet', cleanDocId);
+          const newCabPayload = {
+            cabNumber: cleanCab,
+            site: cleanSite || 'North Terminal Hub',
+            firstDriverName: resolvedSlot === 'second' ? '' : name.trim(),
+            firstDriverPhone: resolvedSlot === 'second' ? '' : phoneNumber.trim(),
+            firstDriverShift: 'morning_12h',
+            secondDriverName: resolvedSlot === 'second' ? name.trim() : '',
+            secondDriverPhone: resolvedSlot === 'second' ? phoneNumber.trim() : '',
+            secondDriverShift: 'night_12h',
+            driverName: name.trim(),
+            driverPhone: phoneNumber.trim(),
+            status: 'reported_at_hub',
+            vehicleType: 'Sedan (Dzire / Etios)',
+            baseHub: cleanSite || 'North Terminal Hub',
+            currentLocationText: `${cleanSite || 'North Terminal Hub'} (Depot)`,
+            currentLocationLat: 12.9716,
+            currentLocationLng: 77.5946,
+            lastUpdated: serverTimestamp(),
+          };
+          await setDoc(cabRef, sanitizeFirestoreData(newCabPayload), { merge: true });
         }
       } catch (linkErr) {
         console.warn('Fleet cab linkage error:', linkErr);

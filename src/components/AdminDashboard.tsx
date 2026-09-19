@@ -4,9 +4,13 @@ import {
   collection,
   onSnapshot,
   query,
+  where,
+  doc,
+  setDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { FleetCab, FleetCabStatus } from '../types';
+import { FleetCab, FleetCabStatus, UserProfile } from '../types';
 import { clearAllFleetData } from '../lib/clearData';
 import { FleetMasterUpload } from './FleetMasterUpload';
 import { AssignDutyModal } from './AssignDutyModal';
@@ -16,6 +20,7 @@ import { FleetLiveMapView } from './FleetLiveMapView';
 import { DriverInstallModal } from './DriverInstallModal';
 import { DateWiseLocationReport } from './DateWiseLocationReport';
 import { AttendanceRegisterView } from './AttendanceRegisterView';
+import { RegisteredDriversView } from './RegisteredDriversView';
 import { formatTimeAgo } from '../lib/timeAgo';
 import {
   reverseGeocode,
@@ -51,19 +56,21 @@ import {
   FileSpreadsheet,
   Plus,
   UserCheck,
+  ChevronRight,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
   const { userProfile, signOut } = useAuth();
 
   const [fleetList, setFleetList] = useState<FleetCab[]>([]);
+  const [driverUsers, setDriverUsers] = useState<UserProfile[]>([]);
   const [isClearing, setIsClearing] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
-  // View state: main dashboard tab ('table' | 'map' | 'reports' | 'attendance') and team settings
+  // View state: main dashboard tab ('table' | 'drivers' | 'map' | 'reports' | 'attendance') and team settings
   const [currentView, setCurrentView] = useState<'dashboard' | 'team'>('dashboard');
-  const [fleetTab, setFleetTab] = useState<'table' | 'map' | 'reports' | 'attendance'>('table');
+  const [fleetTab, setFleetTab] = useState<'table' | 'drivers' | 'map' | 'reports' | 'attendance'>('table');
 
   // Modals state
   const [isAddCabModalOpen, setIsAddCabModalOpen] = useState(false);
@@ -126,6 +133,29 @@ export const AdminDashboard: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // Real-time Firestore live listener for registered drivers in "users" collection
+  useEffect(() => {
+    const driversQuery = query(collection(db, 'users'), where('role', '==', 'driver'));
+    const unsubDrivers = onSnapshot(
+      driversQuery,
+      (snapshot) => {
+        const drivers: UserProfile[] = [];
+        snapshot.forEach((docSnap) => {
+          drivers.push({ uid: docSnap.id, ...(docSnap.data() as UserProfile) });
+        });
+        // Sort newest accounts first
+        drivers.sort((a, b) => {
+          const timeA = (a.createdAt as any)?.seconds || (a.createdAt ? new Date(a.createdAt as any).getTime() : 0);
+          const timeB = (b.createdAt as any)?.seconds || (b.createdAt ? new Date(b.createdAt as any).getTime() : 0);
+          return timeB - timeA;
+        });
+        setDriverUsers(drivers);
+      },
+      (err) => console.error('Driver live listener error:', err)
+    );
+    return () => unsubDrivers();
+  }, []);
+
   // Real-time Firestore live listener for "fleet" collection
   useEffect(() => {
     const fleetQuery = query(collection(db, 'fleet'));
@@ -157,6 +187,42 @@ export const AdminDashboard: React.FC = () => {
       unsubFleet();
     };
   }, [autoFocusTracking]);
+
+  // Automatic Sync: If any driver account registered via mobile with a cabNumber that doesn't yet exist in fleet, immediately add it to fleet!
+  useEffect(() => {
+    if (fleetList.length === 0 || driverUsers.length === 0) return;
+    const existingCabs = new Set(fleetList.map((c) => c.cabNumber.trim().toUpperCase()));
+    for (const driver of driverUsers) {
+      if (driver.cabNumber && driver.cabNumber.trim() !== '') {
+        const normCab = driver.cabNumber.trim().toUpperCase();
+        if (!existingCabs.has(normCab)) {
+          existingCabs.add(normCab); // avoid multiple calls in same cycle
+          const cleanDocId = 'cab_' + normCab.replace(/[^A-Z0-9]/g, '_').toLowerCase();
+          setDoc(
+            doc(db, 'fleet', cleanDocId),
+            {
+              cabNumber: normCab,
+              site: driver.site || userProfile?.site || 'North Terminal Hub',
+              driverName: driver.name || 'Driver',
+              driverPhone: driver.phoneNumber || '',
+              firstDriverName: driver.name || 'Driver',
+              firstDriverPhone: driver.phoneNumber || '',
+              firstDriverShift: driver.shift || 'morning_12h',
+              activeDriverSlot: driver.driverSlot || 'first',
+              vehicleType: 'Sedan (Dzire / Etios)',
+              baseHub: driver.site || userProfile?.site || 'North Terminal Hub',
+              status: 'reported_at_hub',
+              currentLocationText: `${driver.site || userProfile?.site || 'North Terminal Hub'} (Depot)`,
+              currentLocationLat: 12.9716,
+              currentLocationLng: 77.5946,
+              lastUpdated: serverTimestamp(),
+            },
+            { merge: true }
+          ).catch((e) => console.error('Auto-sync cab to fleet failed:', e));
+        }
+      }
+    }
+  }, [driverUsers, fleetList, userProfile?.site]);
 
   const handleFocusCabOnMap = (cab: FleetCab) => {
     setFocusedCabNumber(cab.cabNumber);
@@ -365,6 +431,27 @@ export const AdminDashboard: React.FC = () => {
               <span className="flex-1">Fleet Table</span>
               <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'dashboard' && fleetTab === 'table' ? 'bg-[#1c1917] text-white' : 'bg-[#f5f0e6] text-[#57534e]'}`}>
                 {fleetList.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              id="sidebar-btn-drivers"
+              onClick={() => {
+                setCurrentView('dashboard');
+                setFleetTab('drivers');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                currentView === 'dashboard' && fleetTab === 'drivers'
+                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+              }`}
+            >
+              <Smartphone className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'drivers' ? 'text-[#1c1917]' : 'text-amber-700'}`} />
+              <span className="flex-1">Registered Drivers</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'dashboard' && fleetTab === 'drivers' ? 'bg-[#1c1917] text-white' : 'bg-amber-50 text-amber-900 border border-amber-200'}`}>
+                {driverUsers.length}
               </span>
             </button>
 
@@ -582,22 +669,47 @@ export const AdminDashboard: React.FC = () => {
               </p>
             </div>
 
-            {/* Quick Action in Header: Auto Focus GPS for Map */}
-            {fleetTab === 'map' && currentView === 'dashboard' && (
+            {/* Quick Actions in Header */}
+            <div className="flex items-center gap-2">
+              {fleetTab === 'map' && currentView === 'dashboard' && (
+                <button
+                  type="button"
+                  id="btn-toggle-auto-focus"
+                  onClick={() => setAutoFocusTracking(!autoFocusTracking)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border ${
+                    autoFocusTracking
+                      ? 'bg-cyan-50 text-cyan-900 border-cyan-300 shadow-xs'
+                      : 'bg-[#f5f0e6] text-[#78716c] border-[#ded7c8]'
+                  }`}
+                >
+                  <Crosshair className={`w-3.5 h-3.5 ${autoFocusTracking ? 'text-cyan-600 animate-spin' : 'text-[#78716c]'}`} style={{ animationDuration: '6s' }} />
+                  <span>Auto-Focus: {autoFocusTracking ? 'ON' : 'OFF'}</span>
+                </button>
+              )}
+
               <button
                 type="button"
-                id="btn-toggle-auto-focus"
-                onClick={() => setAutoFocusTracking(!autoFocusTracking)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border ${
-                  autoFocusTracking
-                    ? 'bg-cyan-50 text-cyan-900 border-cyan-300 shadow-xs'
-                    : 'bg-[#f5f0e6] text-[#78716c] border-[#ded7c8]'
-                }`}
+                id="btn-header-upload-fleet"
+                onClick={() => setIsUploadModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                title="Bulk upload cabs from Excel or paste from Google Sheets"
               >
-                <Crosshair className={`w-3.5 h-3.5 ${autoFocusTracking ? 'text-cyan-600 animate-spin' : 'text-[#78716c]'}`} style={{ animationDuration: '6s' }} />
-                <span>Auto-Focus: {autoFocusTracking ? 'ON' : 'OFF'}</span>
+                <UploadCloud className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Bulk Upload Cabs</span>
+                <span className="sm:hidden">Upload</span>
               </button>
-            )}
+
+              <button
+                type="button"
+                id="btn-header-add-cab"
+                onClick={() => setIsAddCabModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                title="Add a single cab"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Add Cab</span>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -612,6 +724,42 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Mobile Registered Drivers Awaiting Cab Alert Banner */}
+          {driverUsers.filter((d) => !d.cabNumber || d.cabNumber.trim() === '').length > 0 &&
+            fleetTab !== 'drivers' &&
+            currentView !== 'team' && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#1c1917]">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-200/90 text-amber-900 shrink-0">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="font-bold flex items-center gap-2">
+                      <span>
+                        {driverUsers.filter((d) => !d.cabNumber || d.cabNumber.trim() === '').length} Driver(s) recently registered via mobile awaiting cab assignment
+                      </span>
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    </div>
+                    <p className="text-[#78716c] text-[11px] mt-0.5">
+                      Newly registered mobile drivers automatically appear in your database. Assign them a cab number to begin tracking.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="btn-banner-view-drivers"
+                  onClick={() => {
+                    setCurrentView('dashboard');
+                    setFleetTab('drivers');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <span>View & Assign Drivers</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
           {/* If Team Settings is active */}
           {currentView === 'team' ? (
@@ -698,6 +846,17 @@ export const AdminDashboard: React.FC = () => {
                   </p>
                 </div>
               </section>
+
+        {/* Tab 0: Registered Drivers List & Account Directory */}
+        {fleetTab === 'drivers' && (
+          <RegisteredDriversView
+            drivers={driverUsers}
+            fleetList={fleetList}
+            currentSupervisorSite={userProfile?.site}
+            onOpenBulkUpload={() => setIsUploadModalOpen(true)}
+            onOpenAddCab={() => setIsAddCabModalOpen(true)}
+          />
+        )}
 
         {/* Tab 1: Live Map View */}
         {fleetTab === 'map' && (
@@ -1275,6 +1434,10 @@ export const AdminDashboard: React.FC = () => {
       <AddCabModal
         isOpen={isAddCabModalOpen}
         onClose={() => setIsAddCabModalOpen(false)}
+        onSwitchToBulkUpload={() => {
+          setIsAddCabModalOpen(false);
+          setIsUploadModalOpen(true);
+        }}
         onSuccess={(cabNo) => {
           setActionSuccessMsg(
             `Cab ${cabNo} added successfully to live fleet!`

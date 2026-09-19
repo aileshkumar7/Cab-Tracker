@@ -33,6 +33,7 @@ interface AddCabModalProps {
   onClose: () => void;
   onSuccess?: (cabNumber: string) => void;
   existingCabNumbers?: string[];
+  onSwitchToBulkUpload?: () => void;
 }
 
 const VEHICLE_TYPES = [
@@ -56,6 +57,7 @@ export const AddCabModal: React.FC<AddCabModalProps> = ({
   onClose,
   onSuccess,
   existingCabNumbers = [],
+  onSwitchToBulkUpload,
 }) => {
   const { userProfile } = useAuth();
 
@@ -237,6 +239,24 @@ export const AddCabModal: React.FC<AddCabModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Switch to Bulk Upload Banner */}
+        {onSwitchToBulkUpload && (
+          <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between gap-3 text-xs text-[#1c1917]">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>Need to add multiple vehicles or import from Excel / Sheets?</span>
+            </div>
+            <button
+              type="button"
+              id="btn-switch-to-bulk-upload"
+              onClick={onSwitchToBulkUpload}
+              className="px-2.5 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 font-bold text-[#1c1917] text-[11px] shrink-0 transition cursor-pointer"
+            >
+              Bulk Upload Cabs &rarr;
+            </button>
+          </div>
+        )}
 
         {/* Error Alert */}
         {errorMsg && (

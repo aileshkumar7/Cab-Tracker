@@ -510,22 +510,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const cleanCab = cabNumber ? cabNumber.trim().toUpperCase().replace(/\s+/g, '') : undefined;
     
-    // For drivers, if email is not provided, generate a synthetic one from cab number
+    // For drivers, generate synthetic email from cab number OR phone number if not provided
     let normEmail = email ? email.trim().toLowerCase() : '';
     if (role === 'driver') {
-      if (!cleanCab && !normEmail) {
-        const msg = 'Please enter your Cab Number to register your driver account.';
-        setError(msg);
-        throw new Error(msg);
-      }
-      if (!normEmail && cleanCab) {
-        normEmail = generateDriverEmail(cleanCab);
+      if (!normEmail) {
+        if (cleanCab) {
+          normEmail = generateDriverEmail(cleanCab);
+        } else if (phoneNumber.trim()) {
+          const cleanDigits = phoneNumber.trim().replace(/\D/g, '');
+          normEmail = `driver.${cleanDigits || Date.now()}@fleet.local`;
+        }
       }
     }
 
     if (!normEmail || !pass || !name) {
       const msg = role === 'driver' 
-        ? 'Please provide your full name, cab number, and password.'
+        ? 'Please provide your full name, phone number, and password.'
         : 'Please provide full name, email, and password.';
       setError(msg);
       throw new Error(msg);
@@ -622,11 +622,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 2. Set active session
     await setSessionAndSyncFirestore(userProfileData);
 
-    // 3. If driver signed up with a cab, link to the fleet document for 2-driver roster
+    // 3. If driver signed up with a cab, guarantee cab exists in fleet collection
     if (cleanCab && role === 'driver') {
       try {
         const qCab = query(collection(db, 'fleet'), where('cabNumber', '==', cleanCab));
         const snap = await getDocs(qCab);
+        const targetSite = site?.trim() || 'North Terminal Hub';
+
         if (!snap.empty) {
           const cabDoc = snap.docs[0];
           const cabRef = doc(db, 'fleet', cabDoc.id);
@@ -647,10 +649,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (site) {
             updatePayload.site = site.trim();
           }
-          await setDoc(cabRef, updatePayload, { merge: true });
+          updatePayload.lastUpdated = serverTimestamp();
+          await setDoc(cabRef, sanitizeFirestoreData(updatePayload), { merge: true });
+        } else {
+          // Cab does not exist yet in fleet: Create it so it instantly appears in Admin Dashboard
+          const cleanDocId = 'cab_' + cleanCab.replace(/[^A-Z0-9]/g, '_').toLowerCase();
+          const cabRef = doc(db, 'fleet', cleanDocId);
+          const newCabPayload = {
+            cabNumber: cleanCab,
+            site: targetSite,
+            firstDriverName: resolvedSlot === 'second' ? '' : name.trim(),
+            firstDriverPhone: resolvedSlot === 'second' ? '' : phoneNumber.trim(),
+            firstDriverShift: 'morning_12h',
+            secondDriverName: resolvedSlot === 'second' ? name.trim() : '',
+            secondDriverPhone: resolvedSlot === 'second' ? phoneNumber.trim() : '',
+            secondDriverShift: 'night_12h',
+            driverName: name.trim(),
+            driverPhone: phoneNumber.trim(),
+            activeDriverSlot: resolvedSlot || 'first',
+            status: 'reported_at_hub',
+            vehicleType: 'Sedan (Dzire / Etios)',
+            baseHub: targetSite,
+            currentLocationText: `${targetSite} (Depot)`,
+            currentLocationLat: 12.9716,
+            currentLocationLng: 77.5946,
+            lastUpdated: serverTimestamp(),
+            createdViaDriverRegistration: true,
+          };
+          await setDoc(cabRef, sanitizeFirestoreData(newCabPayload), { merge: true });
         }
       } catch (linkErr) {
-        console.warn('Cab fleet driver link note:', linkErr);
+        console.warn('Cab fleet driver link/creation note:', linkErr);
       }
     }
   };

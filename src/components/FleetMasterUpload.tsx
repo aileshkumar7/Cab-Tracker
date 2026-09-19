@@ -54,6 +54,8 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
   const { userProfile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [uploadMode, setUploadMode] = useState<'file' | 'paste'>('file');
+  const [pastedText, setPastedText] = useState('');
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<string | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
@@ -72,6 +74,7 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
   const resetState = () => {
     setFileName(null);
     setFileSize(null);
+    setPastedText('');
     setParsedRows([]);
     setWarnings([]);
     setUploadResult(null);
@@ -93,13 +96,137 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
     return (bytes / 1048576).toFixed(1) + ' MB';
   };
 
+  // Generic matrix parser for both file uploads and copy-pasted text
+  const parseMatrix = (rawRows: any[][], label: string, sizeLabel: string) => {
+    if (rawRows.length === 0) {
+      throw new Error('No rows found to process.');
+    }
+
+    setFileName(label);
+    setFileSize(sizeLabel);
+
+    // Check if row 0 is header
+    let startIndex = 0;
+    const firstRowStr = (rawRows[0] || []).map((c) => String(c).toLowerCase()).join(' ');
+    if (
+      firstRowStr.includes('cab') ||
+      firstRowStr.includes('driver') ||
+      firstRowStr.includes('vehicle') ||
+      firstRowStr.includes('hub') ||
+      firstRowStr.includes('phone')
+    ) {
+      startIndex = 1;
+    }
+
+    const rows: ParsedRow[] = [];
+    const warningList: string[] = [];
+
+    for (let i = startIndex; i < rawRows.length; i++) {
+      const raw = rawRows[i];
+      const displayRowNumber = i + 1;
+
+      if (!raw || raw.length === 0 || raw.every((cell) => cell === null || cell === undefined || String(cell).trim() === '')) {
+        continue; // Skip entirely empty rows
+      }
+
+      let cabNumber = '';
+      let site = '';
+      let firstDriverName = '';
+      let firstDriverPhone = '';
+      let secondDriverName = '';
+      let secondDriverPhone = '';
+      let vehicleType = '';
+      let baseHub = '';
+
+      if (raw.length >= 8) {
+        cabNumber = String(raw[0] || '').trim();
+        site = String(raw[1] || '').trim();
+        firstDriverName = String(raw[2] || '').trim();
+        firstDriverPhone = String(raw[3] || '').trim();
+        secondDriverName = String(raw[4] || '').trim();
+        secondDriverPhone = String(raw[5] || '').trim();
+        vehicleType = String(raw[6] || '').trim();
+        baseHub = String(raw[7] || '').trim();
+      } else if (raw.length === 7) {
+        cabNumber = String(raw[0] || '').trim();
+        firstDriverName = String(raw[1] || '').trim();
+        firstDriverPhone = String(raw[2] || '').trim();
+        secondDriverName = String(raw[3] || '').trim();
+        secondDriverPhone = String(raw[4] || '').trim();
+        vehicleType = String(raw[5] || '').trim();
+        baseHub = String(raw[6] || '').trim();
+        site = userProfile?.site || baseHub;
+      } else {
+        // 5 Columns backward compatible
+        cabNumber = String(raw[0] || '').trim();
+        firstDriverName = String(raw[1] || '').trim();
+        firstDriverPhone = String(raw[2] || '').trim();
+        vehicleType = String(raw[3] || '').trim();
+        baseHub = String(raw[4] || '').trim();
+        site = userProfile?.site || baseHub;
+      }
+
+      if (userProfile?.role === 'supervisor' && userProfile?.site) {
+        site = userProfile.site;
+      } else if (!site) {
+        site = baseHub || userProfile?.site || 'North Terminal Hub';
+      }
+
+      // Sensible defaults if not specified
+      if (!vehicleType) vehicleType = 'Sedan (Dzire / Etios)';
+      if (!baseHub) baseHub = site || 'North Terminal Hub';
+
+      const missingFields: string[] = [];
+      if (!cabNumber) missingFields.push('Cab Number');
+      if (!site) missingFields.push('Site / Location');
+      if (!firstDriverName) missingFields.push('1st Driver Name');
+      if (!firstDriverPhone) missingFields.push('1st Driver Phone');
+
+      if (missingFields.length > 0) {
+        const warnMsg = `Row ${displayRowNumber}: Missing required ${missingFields.join(', ')}.`;
+        warningList.push(warnMsg);
+        rows.push({
+          rowIndex: displayRowNumber,
+          cabNumber: cabNumber || '(Missing)',
+          site: site || '(Missing)',
+          firstDriverName: firstDriverName || '(Missing)',
+          firstDriverPhone: firstDriverPhone || '(Missing)',
+          secondDriverName: secondDriverName || '—',
+          secondDriverPhone: secondDriverPhone || '—',
+          vehicleType: vehicleType || '(Missing)',
+          baseHub: baseHub || '(Missing)',
+          isValid: false,
+          warning: warnMsg,
+        });
+      } else {
+        rows.push({
+          rowIndex: displayRowNumber,
+          cabNumber,
+          site,
+          firstDriverName,
+          firstDriverPhone,
+          secondDriverName,
+          secondDriverPhone,
+          vehicleType,
+          baseHub,
+          isValid: true,
+        });
+      }
+    }
+
+    if (rows.length === 0) {
+      throw new Error('No valid data rows found in the input.');
+    }
+
+    setParsedRows(rows);
+    setWarnings(warningList);
+  };
+
   // Parse file buffer via SheetJS
   const processFile = async (file: File) => {
     setIsProcessingFile(true);
     setUploadError(null);
     setUploadResult(null);
-    setFileName(file.name);
-    setFileSize(formatFileSize(file.size));
 
     try {
       const data = await file.arrayBuffer();
@@ -112,137 +239,47 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
 
-      // Convert sheet to array of arrays
       const rawRows: any[][] = utils.sheet_to_json(worksheet, {
         header: 1,
         blankrows: false,
       });
 
-      if (rawRows.length === 0) {
-        throw new Error('The uploaded file is empty.');
-      }
-
-      // Check if row 0 is header
-      let startIndex = 0;
-      const firstRowStr = (rawRows[0] || []).map((c) => String(c).toLowerCase()).join(' ');
-      if (
-        firstRowStr.includes('cab') ||
-        firstRowStr.includes('driver') ||
-        firstRowStr.includes('vehicle') ||
-        firstRowStr.includes('hub') ||
-        firstRowStr.includes('phone')
-      ) {
-        startIndex = 1;
-      }
-
-      const rows: ParsedRow[] = [];
-      const warningList: string[] = [];
-
-      for (let i = startIndex; i < rawRows.length; i++) {
-        const raw = rawRows[i];
-        const displayRowNumber = i + 1;
-
-        if (!raw || raw.length === 0 || raw.every((cell) => cell === null || cell === undefined || String(cell).trim() === '')) {
-          continue; // Skip entirely empty rows
-        }
-
-        // Check column format:
-        // 8 columns (with Site/Location): Cab, Site, Driver1 Name, Driver1 Phone, Driver2 Name, Driver2 Phone, Vehicle, Hub
-        // 7 columns: Cab, Driver1 Name, Driver1 Phone, Driver2 Name, Driver2 Phone, Vehicle, Hub
-        // 5 columns (legacy): Cab, Driver1 Name, Driver1 Phone, Vehicle, Hub
-        let cabNumber = '';
-        let site = '';
-        let firstDriverName = '';
-        let firstDriverPhone = '';
-        let secondDriverName = '';
-        let secondDriverPhone = '';
-        let vehicleType = '';
-        let baseHub = '';
-
-        if (raw.length >= 8) {
-          cabNumber = String(raw[0] || '').trim();
-          site = String(raw[1] || '').trim();
-          firstDriverName = String(raw[2] || '').trim();
-          firstDriverPhone = String(raw[3] || '').trim();
-          secondDriverName = String(raw[4] || '').trim();
-          secondDriverPhone = String(raw[5] || '').trim();
-          vehicleType = String(raw[6] || '').trim();
-          baseHub = String(raw[7] || '').trim();
-        } else if (raw.length === 7) {
-          cabNumber = String(raw[0] || '').trim();
-          firstDriverName = String(raw[1] || '').trim();
-          firstDriverPhone = String(raw[2] || '').trim();
-          secondDriverName = String(raw[3] || '').trim();
-          secondDriverPhone = String(raw[4] || '').trim();
-          vehicleType = String(raw[5] || '').trim();
-          baseHub = String(raw[6] || '').trim();
-          site = userProfile?.site || baseHub;
-        } else {
-          // 5 Columns backward compatible
-          cabNumber = String(raw[0] || '').trim();
-          firstDriverName = String(raw[1] || '').trim();
-          firstDriverPhone = String(raw[2] || '').trim();
-          vehicleType = String(raw[3] || '').trim();
-          baseHub = String(raw[4] || '').trim();
-          site = userProfile?.site || baseHub;
-        }
-
-        // If user is a supervisor with a bound site, strictly enforce their site
-        if (userProfile?.role === 'supervisor' && userProfile?.site) {
-          site = userProfile.site;
-        } else if (!site) {
-          site = baseHub || userProfile?.site || 'Default Site';
-        }
-
-        const missingFields: string[] = [];
-        if (!cabNumber) missingFields.push('Cab Number');
-        if (!site) missingFields.push('Site / Location');
-        if (!firstDriverName) missingFields.push('1st Driver Name');
-        if (!firstDriverPhone) missingFields.push('1st Driver Phone');
-        if (!vehicleType) missingFields.push('Vehicle Type');
-        if (!baseHub) missingFields.push('Base Hub');
-
-        if (missingFields.length > 0) {
-          const warnMsg = `Row ${displayRowNumber}: Missing required ${missingFields.join(', ')}.`;
-          warningList.push(warnMsg);
-          rows.push({
-            rowIndex: displayRowNumber,
-            cabNumber: cabNumber || '(Missing)',
-            site: site || '(Missing)',
-            firstDriverName: firstDriverName || '(Missing)',
-            firstDriverPhone: firstDriverPhone || '(Missing)',
-            secondDriverName: secondDriverName || '—',
-            secondDriverPhone: secondDriverPhone || '—',
-            vehicleType: vehicleType || '(Missing)',
-            baseHub: baseHub || '(Missing)',
-            isValid: false,
-            warning: warnMsg,
-          });
-        } else {
-          rows.push({
-            rowIndex: displayRowNumber,
-            cabNumber,
-            site,
-            firstDriverName,
-            firstDriverPhone,
-            secondDriverName,
-            secondDriverPhone,
-            vehicleType,
-            baseHub,
-            isValid: true,
-          });
-        }
-      }
-
-      if (rows.length === 0) {
-        throw new Error('No data rows found in the spreadsheet.');
-      }
-
-      setParsedRows(rows);
-      setWarnings(warningList);
+      parseMatrix(rawRows, file.name, formatFileSize(file.size));
     } catch (err: any) {
       console.error('Error parsing spreadsheet:', err);
       setUploadError(err.message || 'Failed to read file. Please ensure it is a valid .xlsx or .csv file.');
+      setParsedRows([]);
+    } finally {
+      setIsProcessingFile(false);
+    }
+  };
+
+  // Parse directly pasted text (from Excel, Google Sheets, or CSV)
+  const handleParsePastedText = () => {
+    if (!pastedText.trim()) {
+      setUploadError('Please paste some rows before parsing.');
+      return;
+    }
+    setIsProcessingFile(true);
+    setUploadError(null);
+    setUploadResult(null);
+
+    try {
+      const lines = pastedText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      const matrix: string[][] = lines.map((line) => {
+        if (line.includes('\t')) {
+          return line.split('\t').map((c) => c.trim());
+        }
+        return line.split(',').map((c) => c.trim());
+      });
+
+      parseMatrix(matrix, `Pasted_Rows_${lines.length}_Records`, `${lines.length} lines`);
+    } catch (err: any) {
+      setUploadError('Failed to parse pasted text: ' + err.message);
       setParsedRows([]);
     } finally {
       setIsProcessingFile(false);
@@ -414,14 +451,15 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
       const skippedCount = parsedRows.filter((r) => !r.isValid).length;
       const supervisorName = userProfile?.name || 'Operations Supervisor';
 
-      // Process in batches of 250 (Firestore limit is 500)
-      const BATCH_SIZE = 250;
+      // Process in batches of 100 (Firestore limit is 500; 1 fleet doc + up to 2 driver user docs = max 300 writes per batch)
+      const BATCH_SIZE = 100;
       for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
         const chunk = validRows.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(db);
 
         for (const row of chunk) {
           const normCab = row.cabNumber.trim().toUpperCase();
+          const cleanCabNo = normCab.replace(/[\s\-_]+/g, '');
           const existing = existingCabsMap.get(normCab);
 
           const firstDriverName = row.firstDriverName;
@@ -441,8 +479,10 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
               site: cabSite,
               firstDriverName,
               firstDriverPhone,
+              firstDriverShift: 'morning_12h',
               secondDriverName,
               secondDriverPhone,
+              secondDriverShift: 'night_12h',
               driverName: primaryDriver,
               driverPhone: primaryPhone,
               vehicleType: row.vehicleType,
@@ -460,10 +500,13 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
               site: cabSite,
               firstDriverName,
               firstDriverPhone,
+              firstDriverShift: 'morning_12h',
               secondDriverName,
               secondDriverPhone,
+              secondDriverShift: 'night_12h',
               driverName: firstDriverName,
               driverPhone: firstDriverPhone,
+              activeDriverSlot: 'first',
               vehicleType: row.vehicleType,
               baseHub: row.baseHub,
               status: 'reported_at_hub', // New cabs default to status "reported_at_hub"
@@ -474,6 +517,54 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
               assignedSupervisor: supervisorName,
             });
             addedCount++;
+          }
+
+          // Auto-provision or link primary driver user account in 'users' so driver can log in immediately via mobile
+          if (firstDriverName && firstDriverPhone) {
+            const cleanPhone = firstDriverPhone.replace(/[^0-9]/g, '').slice(-10);
+            const user1DocId = cleanPhone.length >= 10 ? `user_driver_${cleanPhone}` : `driver_${cleanCabNo}_1`;
+            const user1Ref = doc(db, 'users', user1DocId);
+            batch.set(
+              user1Ref,
+              {
+                uid: user1DocId,
+                name: firstDriverName,
+                phoneNumber: firstDriverPhone,
+                cabNumber: normCab,
+                role: 'driver',
+                site: cabSite,
+                shift: 'morning_12h',
+                driverSlot: 'first',
+                temporaryPassword: 'Driver@12345',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          }
+
+          // Auto-provision or link 2nd driver user account if specified
+          if (secondDriverName && secondDriverPhone) {
+            const cleanPhone2 = secondDriverPhone.replace(/[^0-9]/g, '').slice(-10);
+            const user2DocId = cleanPhone2.length >= 10 ? `user_driver_${cleanPhone2}` : `driver_${cleanCabNo}_2`;
+            const user2Ref = doc(db, 'users', user2DocId);
+            batch.set(
+              user2Ref,
+              {
+                uid: user2DocId,
+                name: secondDriverName,
+                phoneNumber: secondDriverPhone,
+                cabNumber: normCab,
+                role: 'driver',
+                site: cabSite,
+                shift: 'night_12h',
+                driverSlot: 'second',
+                temporaryPassword: 'Driver@12345',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
           }
         }
 
@@ -578,56 +669,132 @@ export const FleetMasterUpload: React.FC<FleetMasterUploadProps> = ({
           {/* Upload Area & Instructions */}
           {!uploadResult && (
             <>
-              {/* Drag & Drop File Zone */}
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all ${
-                  fileName
-                    ? 'border-amber-400 bg-amber-50/60'
-                    : 'border-[#ded7c8] hover:border-amber-400 bg-[#faf7f2] hover:bg-[#f5f0e6]'
-                }`}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx, .xls, .csv"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  id="input-fleet-file"
-                />
-
-                {isProcessingFile ? (
-                  <div className="flex flex-col items-center justify-center py-4 space-y-2">
-                    <RefreshCw className="w-8 h-8 text-amber-600 animate-spin" />
-                    <p className="text-sm font-medium text-[#1c1917]">
-                      Parsing spreadsheet with SheetJS...
-                    </p>
-                  </div>
-                ) : fileName ? (
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <FileSpreadsheet className="w-10 h-10 text-amber-700" />
-                    <div className="font-semibold text-[#1c1917] text-base">{fileName}</div>
-                    <div className="text-xs text-[#78716c]">
-                      {fileSize} &bull; {parsedRows.length} rows detected
-                    </div>
-                    <span className="text-[11px] text-amber-700 underline pt-1">
-                      Click to choose another file
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <UploadCloud className="w-10 h-10 text-[#78716c] mb-1" />
-                    <div className="text-sm font-semibold text-[#1c1917]">
-                      Click to browse or drag and drop your file here
-                    </div>
-                    <p className="text-xs text-[#78716c] max-w-sm">
-                      Supported formats: Excel (<code className="text-amber-800 font-bold">.xlsx</code>, <code className="text-amber-800 font-bold">.xls</code>) or CSV (<code className="text-amber-800 font-bold">.csv</code>)
-                    </p>
-                  </div>
-                )}
+              {/* Mode Toggle: File Upload vs Paste Data */}
+              <div className="flex items-center gap-2 border-b border-[#e6e0d4] pb-3">
+                <button
+                  type="button"
+                  id="tab-upload-mode-file"
+                  onClick={() => setUploadMode('file')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                    uploadMode === 'file'
+                      ? 'bg-amber-400 text-[#1c1917] shadow-xs'
+                      : 'bg-[#faf7f2] text-[#78716c] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>Upload Excel / CSV File</span>
+                </button>
+                <button
+                  type="button"
+                  id="tab-upload-mode-paste"
+                  onClick={() => setUploadMode('paste')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                    uploadMode === 'paste'
+                      ? 'bg-amber-400 text-[#1c1917] shadow-xs'
+                      : 'bg-[#faf7f2] text-[#78716c] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Paste Data (from Sheets / Excel)</span>
+                </button>
               </div>
+
+              {uploadMode === 'file' ? (
+                /* Drag & Drop File Zone */
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all ${
+                    fileName
+                      ? 'border-amber-400 bg-amber-50/60'
+                      : 'border-[#ded7c8] hover:border-amber-400 bg-[#faf7f2] hover:bg-[#f5f0e6]'
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx, .xls, .csv"
+                    onChange={handleFileChange}
+                    className="hidden"
+                    id="input-fleet-file"
+                  />
+
+                  {isProcessingFile ? (
+                    <div className="flex flex-col items-center justify-center py-4 space-y-2">
+                      <RefreshCw className="w-8 h-8 text-amber-600 animate-spin" />
+                      <p className="text-sm font-medium text-[#1c1917]">
+                        Parsing spreadsheet with SheetJS...
+                      </p>
+                    </div>
+                  ) : fileName ? (
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <FileSpreadsheet className="w-10 h-10 text-amber-700" />
+                      <div className="font-semibold text-[#1c1917] text-base">{fileName}</div>
+                      <div className="text-xs text-[#78716c]">
+                        {fileSize} &bull; {parsedRows.length} rows detected
+                      </div>
+                      <span className="text-[11px] text-amber-700 underline pt-1">
+                        Click to choose another file
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <UploadCloud className="w-10 h-10 text-[#78716c] mb-1" />
+                      <div className="text-sm font-semibold text-[#1c1917]">
+                        Click to browse or drag and drop your file here
+                      </div>
+                      <p className="text-xs text-[#78716c] max-w-sm">
+                        Supported formats: Excel (<code className="text-amber-800 font-bold">.xlsx</code>, <code className="text-amber-800 font-bold">.xls</code>) or CSV (<code className="text-amber-800 font-bold">.csv</code>)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Paste Data Zone */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="textarea-paste-data" className="text-xs font-bold text-[#1c1917]">
+                      Paste rows copied directly from Excel, Google Sheets, or CSV:
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPastedText(
+                          `Cab Number\tSite / Location\t1st Driver Name\t1st Driver Phone\t2nd Driver Name\t2nd Driver Phone\tVehicle Type\tBase Hub\nKA-01-AB-1024\tNorth Terminal Hub\tRajesh Kumar\t+91 98765 43210\tVikram Malhotra\t+91 98111 22334\tSedan\tNorth Terminal Hub\nKA-01-MG-5588\tCentral Tech Park Hub\tAmit Singh\t+91 98451 22334\tDeepak Verma\t+91 98722 55667\tSUV\tCentral Tech Park Hub`
+                        )
+                      }
+                      className="text-[11px] font-bold text-amber-700 hover:text-amber-800 underline cursor-pointer"
+                    >
+                      Fill Sample Data
+                    </button>
+                  </div>
+                  <textarea
+                    id="textarea-paste-data"
+                    rows={6}
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="Example:&#10;KA-01-AB-1024, North Terminal Hub, Rajesh Kumar, 9876543210, Vikram Malhotra, 9811122334, Sedan, North Hub&#10;KA-01-MG-5588, Central Hub, Amit Singh, 9845122334, Deepak Verma, 9872255667, SUV, Central Hub"
+                    className="w-full font-mono text-xs p-3.5 rounded-xl border border-[#ded7c8] bg-[#faf7f2] focus:bg-white focus:border-amber-400 focus:outline-none text-[#1c1917]"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      id="btn-parse-pasted-data"
+                      onClick={handleParsePastedText}
+                      disabled={isProcessingFile || !pastedText.trim()}
+                      className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer"
+                    >
+                      {isProcessingFile ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                      <span>Parse & Validate Pasted Rows</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Template & Helper Bar */}
               <div className="bg-[#faf7f2] border border-[#ded7c8] rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
