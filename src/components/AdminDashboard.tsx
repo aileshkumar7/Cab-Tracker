@@ -1405,14 +1405,14 @@ export const AdminDashboard: React.FC = () => {
                 <button
                   type="button"
                   id="filter-free"
-                  onClick={() => setStatusFilter(statusFilter === 'free' || statusFilter === 'cab_off_duty' ? 'all' : 'cab_off_duty')}
+                  onClick={() => setStatusFilter(statusFilter === 'free' || statusFilter === 'cab_off_duty' ? 'all' : 'free')}
                   className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
                     statusFilter === 'free' || statusFilter === 'cab_off_duty'
-                      ? 'bg-stone-200 text-stone-900 border border-stone-300 shadow-xs font-bold'
-                      : 'text-[#78716c] hover:text-stone-900'
+                      ? 'bg-emerald-100 text-emerald-950 border border-emerald-400 shadow-xs font-bold'
+                      : 'text-[#78716c] hover:text-emerald-900'
                   }`}
                 >
-                  Cab Off Duty ({offDutyCabsCount})
+                  Free ({offDutyCabsCount})
                 </button>
                 <button
                   type="button"
@@ -1481,7 +1481,7 @@ export const AdminDashboard: React.FC = () => {
               </span>
               {statusFilter !== 'all' && (
                 <span className="font-semibold text-amber-800">
-                  (Filter: {statusFilter === 'on_duty' ? 'Cabs on Duty' : 'Cab Off Duty'})
+                  (Filter: {statusFilter === 'on_duty' ? 'Cabs on Duty' : 'Free (Standing Available)'})
                 </span>
               )}
               {searchTerm && (
@@ -1752,10 +1752,10 @@ export const AdminDashboard: React.FC = () => {
                                 ) : (
                                   <span
                                     id={`badge-status-${cab.cabNumber}`}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-stone-100 text-stone-800 border border-stone-300 shadow-xs"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-xs"
                                   >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-stone-500" />
-                                    Cab Off Duty
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                                    Free (Cab Off Duty)
                                   </span>
                                 )}
 
@@ -1824,19 +1824,33 @@ export const AdminDashboard: React.FC = () => {
 
                                   {/* "Cab Off Duty" Tag under Ideal Standing Location */}
                                   <div className="flex items-center gap-2 pt-0.5 flex-wrap">
-                                    {!isOnDuty && (
+                                    {!isOnDuty ? (
                                       <span
-                                        id={`tag-standing-status-${cab.cabNumber}`}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-stone-100 text-stone-800 border border-stone-300 shadow-xs"
-                                        title="Cab Off Duty tag under ideal standing location"
+                                        id={`tag-standing-free-${cab.cabNumber}`}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-950 border border-emerald-400 shadow-xs uppercase tracking-wider"
+                                        title="Cab is Standing Free at this location"
                                       >
-                                        <span className="w-1.5 h-1.5 rounded-full bg-stone-500" />
-                                        Cab Off Duty
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                                        Free
+                                      </span>
+                                    ) : (
+                                      <span
+                                        id={`tag-standing-onduty-${cab.cabNumber}`}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-900 border border-blue-300 shadow-xs"
+                                        title="Vehicle is currently On Duty"
+                                      >
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                                        On Duty
                                       </span>
                                     )}
 
                                     {isPunched && (
-                                      <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      <span
+                                        id={`tag-standing-punched-${cab.cabNumber}`}
+                                        className="inline-flex items-center gap-1 text-[10px] font-bold text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200"
+                                        title="Current location verified via driver GPS punch"
+                                      >
+                                        <CheckCircle2 className="w-3 h-3 text-teal-600 shrink-0" />
                                         Punched Location
                                       </span>
                                     )}

@@ -624,7 +624,7 @@ export const DriverDutyScreen: React.FC = () => {
         });
       }
 
-      const updatedStatus: FleetCabStatus = activeDuty ? 'on_duty' : 'cab_off_duty';
+      const updatedStatus: FleetCabStatus = activeDuty ? 'on_duty' : 'free';
 
       if (docId) {
         setFleetDocId(docId);
@@ -1106,6 +1106,7 @@ export const DriverDutyScreen: React.FC = () => {
             cabNumber,
             driverName,
             driverPhone,
+            status: activeDuty ? 'on_duty' : 'free',
             currentLocationLat: capturedLocation.latitude,
             currentLocationLng: capturedLocation.longitude,
             currentLocationText: capturedLocation.locationText,
@@ -1124,6 +1125,7 @@ export const DriverDutyScreen: React.FC = () => {
             await updateDoc(doc(db, 'fleet', docId), {
               driverName,
               driverPhone,
+              status: activeDuty ? 'on_duty' : 'free',
               currentLocationLat: capturedLocation.latitude,
               currentLocationLng: capturedLocation.longitude,
               currentLocationText: capturedLocation.locationText,

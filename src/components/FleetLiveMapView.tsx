@@ -401,13 +401,13 @@ export const FleetLiveMapView: React.FC<FleetLiveMapViewProps> = ({
                             <MapPin className="w-3 h-3 text-amber-700 shrink-0" />
                             <span>Standing Location:</span>
                           </span>
-                          {!cab.isMoving ? (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-100 text-stone-800 font-bold border border-stone-300">
-                              Cab Off Duty
+                          {cab.status === 'on_duty' ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 font-bold border border-blue-300">
+                              {cab.isMoving ? 'On Route (Duty)' : 'On Duty'}
                             </span>
                           ) : (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-50 text-blue-800 font-bold border border-blue-300">
-                              On Route
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-950 font-black border border-emerald-400">
+                              Free (Standing)
                             </span>
                           )}
                         </div>
