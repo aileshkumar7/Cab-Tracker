@@ -13,7 +13,14 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { UserProfile, UserRole, DriverShiftType, DriverSlotType } from '../types';
+import {
+  UserProfile,
+  UserRole,
+  DriverShiftType,
+  DriverSlotType,
+  SubVendorPermissions,
+  DEFAULT_SUB_VENDOR_PERMISSIONS,
+} from '../types';
 
 /**
  * Generates a clean synthetic email for drivers registering with Cab Number
@@ -356,3 +363,156 @@ export function generateTemporaryPassword(): string {
     .sort(() => 0.5 - Math.random())
     .join('');
 }
+
+/**
+ * Creates a dedicated Sub-Vendor account in Firebase Auth and Firestore "users"
+ * with customized permissions and assigned cabs.
+ */
+export async function createSubVendorAccount({
+  vendorName,
+  contactName,
+  email,
+  phoneNumber,
+  password,
+  site,
+  assignedCabs = [],
+  permissions = DEFAULT_SUB_VENDOR_PERMISSIONS,
+}: {
+  vendorName: string;
+  contactName: string;
+  email: string;
+  phoneNumber: string;
+  password: string;
+  site?: string;
+  assignedCabs?: string[];
+  permissions?: SubVendorPermissions;
+}): Promise<{ uid: string; userProfile: UserProfile }> {
+  const normEmail = email.trim().toLowerCase();
+  if (!normEmail) {
+    throw new Error('Please provide an email address for the sub-vendor account.');
+  }
+
+  // Check if email already registered
+  const qEmail = query(collection(db, 'users'), where('email', '==', normEmail));
+  const snapEmail = await getDocs(qEmail);
+  if (!snapEmail.empty) {
+    throw new Error(`An account with email "${normEmail}" already exists.`);
+  }
+
+  const secondaryAppName = `subvendor-creator-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+  const secondaryAuth = getAuth(secondaryApp);
+
+  let targetUid = `vendor-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+  try {
+    try {
+      const userCredential = await createUserWithEmailAndPassword(
+        secondaryAuth,
+        normEmail,
+        password
+      );
+      if (userCredential.user) {
+        targetUid = userCredential.user.uid;
+      }
+      await signOut(secondaryAuth);
+    } catch (authErr: any) {
+      if (authErr?.code === 'auth/email-already-in-use') {
+        throw new Error(`An account with email "${normEmail}" already exists in Authentication.`);
+      }
+      console.warn('Secondary auth notice for subvendor:', authErr?.code);
+    }
+
+    const cleanCabs = (assignedCabs || [])
+      .map((c) => c.trim().toUpperCase().replace(/\s+/g, ''))
+      .filter(Boolean);
+
+    const userProfileData: UserProfile = {
+      uid: targetUid,
+      name: contactName.trim(),
+      email: normEmail,
+      phoneNumber: phoneNumber.trim(),
+      role: 'sub_vendor',
+      vendorName: vendorName.trim(),
+      assignedCabs: cleanCabs,
+      permissions: permissions || DEFAULT_SUB_VENDOR_PERMISSIONS,
+      status: 'active',
+      site: site?.trim() || 'North Terminal Hub',
+      temporaryPassword: password,
+      createdAt: new Date().toISOString() as any,
+    };
+
+    const firestorePayload: Record<string, any> = {
+      ...sanitizeFirestoreData(userProfileData),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      temporaryPassword: password,
+    };
+
+    await setDoc(doc(db, 'users', targetUid), firestorePayload, { merge: true });
+
+    // Optional: Tag any fleet cabs with this vendorName if assigned
+    if (cleanCabs.length > 0) {
+      try {
+        const fleetSnap = await getDocs(collection(db, 'fleet'));
+        for (const fDoc of fleetSnap.docs) {
+          const fData = fDoc.data();
+          const cabNo = (fData.cabNumber || '').trim().toUpperCase().replace(/\s+/g, '');
+          if (cleanCabs.includes(cabNo)) {
+            await updateDoc(doc(db, 'fleet', fDoc.id), {
+              vendorName: vendorName.trim(),
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Cab vendor tag update notice:', err);
+      }
+    }
+
+    return { uid: targetUid, userProfile: userProfileData };
+  } finally {
+    try {
+      await deleteApp(secondaryApp);
+    } catch (e) {
+      // Ignored
+    }
+  }
+}
+
+/**
+ * Updates Sub-Vendor details, permissions, assigned cabs, or status
+ */
+export async function updateSubVendorAccount(
+  uid: string,
+  updatedFields: {
+    vendorName?: string;
+    name?: string;
+    phoneNumber?: string;
+    assignedCabs?: string[];
+    permissions?: SubVendorPermissions;
+    status?: 'active' | 'suspended';
+    site?: string;
+    temporaryPassword?: string;
+  }
+): Promise<void> {
+  const userRef = doc(db, 'users', uid);
+  const cleanPayload: Record<string, any> = {
+    updatedAt: serverTimestamp(),
+  };
+
+  if (updatedFields.vendorName !== undefined) cleanPayload.vendorName = updatedFields.vendorName.trim();
+  if (updatedFields.name !== undefined) cleanPayload.name = updatedFields.name.trim();
+  if (updatedFields.phoneNumber !== undefined) cleanPayload.phoneNumber = updatedFields.phoneNumber.trim();
+  if (updatedFields.site !== undefined) cleanPayload.site = updatedFields.site.trim();
+  if (updatedFields.status !== undefined) cleanPayload.status = updatedFields.status;
+  if (updatedFields.temporaryPassword !== undefined) cleanPayload.temporaryPassword = updatedFields.temporaryPassword;
+  if (updatedFields.permissions !== undefined) cleanPayload.permissions = updatedFields.permissions;
+  if (updatedFields.assignedCabs !== undefined) {
+    cleanPayload.assignedCabs = updatedFields.assignedCabs
+      .map((c) => c.trim().toUpperCase().replace(/\s+/g, ''))
+      .filter(Boolean);
+  }
+
+  await updateDoc(userRef, sanitizeFirestoreData(cleanPayload));
+}
+

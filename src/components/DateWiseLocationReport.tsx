@@ -49,12 +49,12 @@ export interface ReportItem {
 }
 
 interface DateWiseLocationReportProps {
-  fleetList: FleetCab[];
+  fleetList?: FleetCab[];
   onViewCabOnMap?: (cabNumber: string) => void;
 }
 
 export const DateWiseLocationReport: React.FC<DateWiseLocationReportProps> = ({
-  fleetList,
+  fleetList = [],
   onViewCabOnMap,
 }) => {
   // Helper for current date strings

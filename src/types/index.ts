@@ -1,9 +1,33 @@
 import { Timestamp } from 'firebase/firestore';
 
-export type UserRole = 'master_admin' | 'admin' | 'supervisor' | 'driver';
+export type UserRole = 'master_admin' | 'admin' | 'supervisor' | 'driver' | 'sub_vendor';
 
 export type DriverShiftType = 'morning_12h' | 'night_12h';
 export type DriverSlotType = 'first' | 'second';
+
+export interface SubVendorPermissions {
+  canViewMap: boolean;
+  canViewFleetTable: boolean;
+  canAssignDuty: boolean;
+  canViewReports: boolean;
+  canViewAttendance: boolean;
+  canAddCab: boolean;
+  canDeleteCab: boolean;
+  canExportData: boolean;
+  canViewDrivers: boolean;
+}
+
+export const DEFAULT_SUB_VENDOR_PERMISSIONS: SubVendorPermissions = {
+  canViewMap: true,
+  canViewFleetTable: true,
+  canAssignDuty: true,
+  canViewReports: true,
+  canViewAttendance: true,
+  canAddCab: false,
+  canDeleteCab: false,
+  canExportData: true,
+  canViewDrivers: true,
+};
 
 export interface UserProfile {
   uid: string;
@@ -16,6 +40,10 @@ export interface UserProfile {
   shift?: DriverShiftType; // 'morning_12h' (1st Driver) or 'night_12h' (2nd Driver)
   driverSlot?: DriverSlotType; // 'first' | 'second'
   temporaryPassword?: string; // Plaintext or initial password for admin credential tracking
+  vendorName?: string; // Company / agency name for Sub-Vendors (e.g. 'Apex Travel Fleet', 'Sai Logistics')
+  assignedCabs?: string[]; // Cabs that this Sub-Vendor is authorized to track
+  permissions?: SubVendorPermissions; // Specific features enabled for this Sub-Vendor by Master Admin
+  status?: 'active' | 'suspended';
   createdAt: Timestamp | string | number;
   lastLogin?: Timestamp | any;
 }
@@ -30,6 +58,7 @@ export interface FleetCab {
   vehicleType: string;
   baseHub: string;
   site?: string; // Bound site / location
+  vendorName?: string; // Sub-Vendor company name if owned/supplied by a vendor
   status: FleetCabStatus;
   currentLocationText: string;
   currentLocationLat: number;

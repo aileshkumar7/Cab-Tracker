@@ -30,16 +30,16 @@ import {
 } from 'lucide-react';
 
 interface RegisteredDriversViewProps {
-  drivers: UserProfile[];
-  fleetList: FleetCab[];
+  drivers?: UserProfile[];
+  fleetList?: FleetCab[];
   currentSupervisorSite?: string;
   onOpenBulkUpload?: () => void;
   onOpenAddCab?: () => void;
 }
 
 export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
-  drivers,
-  fleetList,
+  drivers = [],
+  fleetList = [],
   currentSupervisorSite,
   onOpenBulkUpload,
   onOpenAddCab,
@@ -62,9 +62,11 @@ export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
   const [isDeletingDriver, setIsDeletingDriver] = useState(false);
   const [unassignFromCabOnDelete, setUnassignFromCabOnDelete] = useState(true);
 
-  const existingCabNumbers = new Set(fleetList.map((c) => c.cabNumber.trim().toUpperCase()));
+  const safeDrivers = drivers || [];
+  const safeFleet = fleetList || [];
+  const existingCabNumbers = new Set(safeFleet.map((c) => (c.cabNumber || '').trim().toUpperCase()));
 
-  const filteredDrivers = drivers.filter((driver) => {
+  const filteredDrivers = safeDrivers.filter((driver) => {
     const term = searchTerm.toLowerCase().trim();
     const matchesSearch =
       !term ||
@@ -80,8 +82,8 @@ export const RegisteredDriversView: React.FC<RegisteredDriversViewProps> = ({
     return matchesSearch;
   });
 
-  const assignedCount = drivers.filter((d) => d.cabNumber && d.cabNumber.trim() !== '').length;
-  const unassignedCount = drivers.length - assignedCount;
+  const assignedCount = safeDrivers.filter((d) => d.cabNumber && d.cabNumber.trim() !== '').length;
+  const unassignedCount = safeDrivers.length - assignedCount;
 
   const handleCopy = async (text: string, id: string, label: string) => {
     const ok = await copyToClipboard(text);

@@ -5,6 +5,8 @@ import {
   onSnapshot,
   query,
   where,
+  orderBy,
+  limit,
   doc,
   setDoc,
   updateDoc,
@@ -13,17 +15,19 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { FleetCab, FleetCabStatus, UserProfile } from '../types';
+import { FleetCab, FleetCabStatus, UserProfile, DEFAULT_SUB_VENDOR_PERMISSIONS } from '../types';
 import { clearAllFleetData } from '../lib/clearData';
 import { FleetMasterUpload } from './FleetMasterUpload';
 import { AssignDutyModal } from './AssignDutyModal';
 import { AddCabModal } from './AddCabModal';
 import { TeamSettingsPage } from './TeamSettingsPage';
+import { SubVendorsManagementView } from './SubVendorsManagementView';
 import { FleetLiveMapView } from './FleetLiveMapView';
 import { DriverInstallModal } from './DriverInstallModal';
 import { DateWiseLocationReport } from './DateWiseLocationReport';
 import { AttendanceRegisterView } from './AttendanceRegisterView';
 import { RegisteredDriversView } from './RegisteredDriversView';
+import { soundNotificationService } from '../lib/soundNotification';
 import { formatTimeAgo } from '../lib/timeAgo';
 import {
   reverseGeocode,
@@ -62,10 +66,15 @@ import {
   ChevronRight,
   X,
   AlertCircle,
+  Volume2,
+  VolumeX,
+  Bell,
+  Building2,
+  ShieldAlert,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
-  const { userProfile, signOut } = useAuth();
+  const { userProfile, signOut, signIn } = useAuth();
 
   const [fleetList, setFleetList] = useState<FleetCab[]>([]);
   const [driverUsers, setDriverUsers] = useState<UserProfile[]>([]);
@@ -73,9 +82,21 @@ export const AdminDashboard: React.FC = () => {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
-  // View state: main dashboard tab ('table' | 'drivers' | 'map' | 'reports' | 'attendance') and team settings
-  const [currentView, setCurrentView] = useState<'dashboard' | 'team'>('dashboard');
+  // View state: main dashboard tab ('table' | 'drivers' | 'map' | 'reports' | 'attendance'), team settings, or subvendors
+  const [currentView, setCurrentView] = useState<'dashboard' | 'team' | 'subvendors'>('dashboard');
   const [fleetTab, setFleetTab] = useState<'table' | 'drivers' | 'map' | 'reports' | 'attendance'>('table');
+
+  // Sub-Vendors list
+  const [subVendorsList, setSubVendorsList] = useState<UserProfile[]>([]);
+
+  // Sound Notification state
+  const [isSoundEnabled, setIsSoundEnabled] = useState(() => soundNotificationService.isEnabled());
+  const [punchToast, setPunchToast] = useState<{
+    driverName: string;
+    cabNumber: string;
+    locationText: string;
+    timeStr: string;
+  } | null>(null);
 
   // Modals state
   const [isAddCabModalOpen, setIsAddCabModalOpen] = useState(false);
@@ -238,6 +259,171 @@ export const AdminDashboard: React.FC = () => {
     }
   }, [driverUsers, fleetList, userProfile?.site]);
 
+  // Live Firestore listener for Sub-Vendor accounts
+  useEffect(() => {
+    const qVendors = query(collection(db, 'users'), where('role', '==', 'sub_vendor'));
+    const unsubVendors = onSnapshot(
+      qVendors,
+      (snapshot) => {
+        const vendors: UserProfile[] = [];
+        snapshot.forEach((d) => {
+          vendors.push({ uid: d.id, ...(d.data() as UserProfile) });
+        });
+        setSubVendorsList(vendors);
+      },
+      (err) => console.warn('Sub-vendors live query notice:', err)
+    );
+    return () => unsubVendors();
+  }, []);
+
+  // Live listener for Driver Location Punches -> Produces Sound Chime & Visual Notification
+  const hasInitializedNotifsRef = useRef(false);
+  useEffect(() => {
+    const notifQuery = query(
+      collection(db, 'notifications'),
+      orderBy('timestamp', 'desc'),
+      limit(15)
+    );
+
+    const unsubNotif = onSnapshot(
+      notifQuery,
+      (snapshot) => {
+        if (!hasInitializedNotifsRef.current) {
+          hasInitializedNotifsRef.current = true;
+          return;
+        }
+
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.type === 'location_punch') {
+              const punchedCab = (data.cabNumber || '').trim().toUpperCase();
+
+              // If logged in as Sub-Vendor, only play sound & alert if this cab belongs to them!
+              if (
+                userProfile?.role === 'sub_vendor' &&
+                userProfile.assignedCabs &&
+                userProfile.assignedCabs.length > 0
+              ) {
+                const assignedSet = new Set(
+                  userProfile.assignedCabs.map((c) => c.trim().toUpperCase().replace(/\s+/g, ''))
+                );
+                const cleanPunched = punchedCab.replace(/\s+/g, '');
+                if (!assignedSet.has(cleanPunched)) {
+                  return; // Cab not assigned to this vendor
+                }
+              }
+
+              // Play Web Audio Chime!
+              soundNotificationService.playLocationPunchChime();
+
+              // Show Rich Notification Banner
+              const nowTime = new Date().toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              });
+
+              setPunchToast({
+                driverName: data.driverName || 'Driver',
+                cabNumber: punchedCab || 'Fleet Cab',
+                locationText: data.locationText || 'Punched Current Location',
+                timeStr: nowTime,
+              });
+
+              setTimeout(() => {
+                setPunchToast((curr) => (curr?.cabNumber === punchedCab ? null : curr));
+              }, 7000);
+            }
+          }
+        });
+      },
+      (err) => console.warn('Notifications live listener notice:', err)
+    );
+
+    return () => unsubNotif();
+  }, [userProfile?.role, userProfile?.assignedCabs]);
+
+  // Helper to normalize cab registration numbers across any formatting (dashes, spaces, slashes)
+  const normalizeCabKey = (str?: string) => (str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  // Sub-Vendor Role & Permissions Detection
+  const isSubVendor = userProfile?.role === 'sub_vendor' || (userProfile?.role as string) === 'vendor';
+  const isMasterOrAdmin = userProfile?.role === 'master_admin' || userProfile?.role === 'admin';
+  const vendorPerms = userProfile?.permissions || DEFAULT_SUB_VENDOR_PERMISSIONS;
+
+  // Check if current browser opened the vendor portal link (?role=vendor or ?portal=vendor)
+  const isVendorDeepLinkInUrl = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('role') === 'vendor' ||
+    new URLSearchParams(window.location.search).get('role') === 'sub_vendor' ||
+    new URLSearchParams(window.location.search).get('portal') === 'vendor' ||
+    new URLSearchParams(window.location.search).get('app') === 'vendor'
+  );
+
+  // Auto-switch initial tab if sub-vendor lacks permission for 'table'
+  useEffect(() => {
+    if (isSubVendor) {
+      if (!vendorPerms.canViewFleetTable && vendorPerms.canViewMap) {
+        setFleetTab('map');
+      } else if (!vendorPerms.canViewFleetTable && vendorPerms.canViewReports) {
+        setFleetTab('reports');
+      } else if (!vendorPerms.canViewFleetTable && vendorPerms.canViewAttendance) {
+        setFleetTab('attendance');
+      } else if (!vendorPerms.canViewFleetTable && vendorPerms.canViewDrivers) {
+        setFleetTab('drivers');
+      }
+    }
+  }, [isSubVendor, vendorPerms]);
+
+  // Scoped fleet list: STRICTLY show only cabs assigned to this sub-vendor
+  const visibleFleetList = useMemo(() => {
+    if (!isSubVendor) return fleetList;
+
+    const assigned = userProfile?.assignedCabs || [];
+    const vName = userProfile?.vendorName?.trim().toLowerCase();
+
+    // 1. If sub-vendor has explicit assigned cab numbers
+    if (assigned.length > 0) {
+      const cleanAssignedSet = new Set(assigned.map(normalizeCabKey).filter(Boolean));
+      return fleetList.filter((cab) => {
+        const norm = normalizeCabKey(cab.cabNumber);
+        const matchesAssigned = cleanAssignedSet.has(norm);
+        const matchesVendorName = Boolean(vName && cab.vendorName && cab.vendorName.trim().toLowerCase() === vName);
+        return matchesAssigned || matchesVendorName;
+      });
+    }
+
+    // 2. If sub-vendor is mapped by company / vendorName
+    if (vName) {
+      return fleetList.filter(
+        (c) => c.vendorName && c.vendorName.trim().toLowerCase() === vName
+      );
+    }
+
+    // 3. Strict isolation: If a sub-vendor has NO assigned cabs, return empty array!
+    // Never leak the entire master fleet to an unconfigured sub-vendor!
+    return [];
+  }, [fleetList, isSubVendor, userProfile?.assignedCabs, userProfile?.vendorName]);
+
+  // Scoped driver list for sub-vendor
+  const scopedDriverUsers = useMemo(() => {
+    if (!isSubVendor) return driverUsers;
+
+    const assigned = userProfile?.assignedCabs || [];
+    const vName = userProfile?.vendorName?.trim().toLowerCase();
+
+    // Strict isolation: if no assigned cabs, return empty array
+    if (assigned.length === 0 && !vName) return [];
+
+    const cleanAssignedSet = new Set(assigned.map(normalizeCabKey).filter(Boolean));
+
+    return driverUsers.filter((d) => {
+      if (!d.cabNumber) return false;
+      const norm = normalizeCabKey(d.cabNumber);
+      return cleanAssignedSet.has(norm);
+    });
+  }, [driverUsers, isSubVendor, userProfile?.assignedCabs, userProfile?.vendorName]);
+
   const handleFocusCabOnMap = (cab: FleetCab) => {
     setFocusedCabNumber(cab.cabNumber);
     setFleetTab('map');
@@ -323,18 +509,18 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // 1. Two Summary Card live calculations from "fleet" collection
+  // 1. Two Summary Card live calculations based on visibleFleetList
   const offDutyCabsCount = useMemo(
-    () => fleetList.filter((c) => c.status === 'free' || c.status === 'cab_off_duty' || c.status === 'reported_at_hub').length,
-    [fleetList]
+    () => visibleFleetList.filter((c) => c.status === 'free' || c.status === 'cab_off_duty' || c.status === 'reported_at_hub').length,
+    [visibleFleetList]
   );
   const onDutyCount = useMemo(
-    () => fleetList.filter((c) => c.status === 'on_duty').length,
-    [fleetList]
+    () => visibleFleetList.filter((c) => c.status === 'on_duty').length,
+    [visibleFleetList]
   );
   const reportedAtHubCount = useMemo(
-    () => fleetList.filter((c) => c.status === 'reported_at_hub' || Boolean(c.lastPunchedLocation || c.currentLocationText)).length,
-    [fleetList]
+    () => visibleFleetList.filter((c) => c.status === 'reported_at_hub' || Boolean(c.lastPunchedLocation || c.currentLocationText)).length,
+    [visibleFleetList]
   );
 
   // Helper to extract numeric epoch time for sorting
@@ -348,9 +534,9 @@ export const AdminDashboard: React.FC = () => {
     return 0;
   };
 
-  // Filtered & Sorted Cabs
+  // Filtered & Sorted Cabs based on visibleFleetList
   const filteredAndSortedCabs = useMemo(() => {
-    return fleetList
+    return visibleFleetList
       .filter((cab) => {
         // Status filter
         if ((statusFilter === 'free' || statusFilter === 'cab_off_duty') && cab.status === 'on_duty') {
@@ -405,7 +591,7 @@ export const AdminDashboard: React.FC = () => {
 
         return 0;
       });
-  }, [fleetList, searchTerm, statusFilter, sortBy, sortOrder]);
+  }, [visibleFleetList, searchTerm, statusFilter, sortBy, sortOrder]);
 
   const toggleSort = (newSortBy: 'lastUpdated' | 'status' | 'cabNumber') => {
     if (sortBy === newSortBy) {
@@ -463,15 +649,32 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-3 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-              <ShieldCheck className="w-3 h-3 text-amber-700" /> SUPERVISOR
-            </span>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            {isSubVendor ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-900 border border-cyan-300">
+                <Building2 className="w-3 h-3 text-cyan-700" /> SUB-VENDOR
+              </span>
+            ) : isMasterOrAdmin ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                <ShieldCheck className="w-3 h-3 text-amber-700" /> MASTER ADMIN
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-300">
+                <ShieldCheck className="w-3 h-3 text-indigo-700" /> SUPERVISOR
+              </span>
+            )}
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-900 border border-emerald-300">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
               Live Sync
             </span>
           </div>
+
+          {isSubVendor && userProfile?.vendorName && (
+            <div className="mt-2.5 px-2.5 py-1 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-950 text-xs font-bold flex items-center gap-1.5 truncate">
+              <Building2 className="w-3.5 h-3.5 text-cyan-700 shrink-0" />
+              <span className="truncate">{userProfile.vendorName}</span>
+            </div>
+          )}
         </div>
 
         {/* Scrollable Navigation & Operations */}
@@ -482,128 +685,163 @@ export const AdminDashboard: React.FC = () => {
               Views & Telemetry
             </div>
 
-            <button
-              type="button"
-              id="sidebar-btn-table"
-              onClick={() => {
-                setCurrentView('dashboard');
-                setFleetTab('table');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
-                currentView === 'dashboard' && fleetTab === 'table'
-                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
-                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
-              }`}
-            >
-              <TableIcon className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'table' ? 'text-[#1c1917]' : 'text-amber-600'}`} />
-              <span className="flex-1">Fleet Table</span>
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'dashboard' && fleetTab === 'table' ? 'bg-[#1c1917] text-white' : 'bg-[#f5f0e6] text-[#57534e]'}`}>
-                {fleetList.length}
-              </span>
-            </button>
+            {(!isSubVendor || vendorPerms.canViewFleetTable) && (
+              <button
+                type="button"
+                id="sidebar-btn-table"
+                onClick={() => {
+                  setCurrentView('dashboard');
+                  setFleetTab('table');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'dashboard' && fleetTab === 'table'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <TableIcon className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'table' ? 'text-[#1c1917]' : 'text-amber-600'}`} />
+                <span className="flex-1">Fleet Table</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'dashboard' && fleetTab === 'table' ? 'bg-[#1c1917] text-white' : 'bg-[#f5f0e6] text-[#57534e]'}`}>
+                  {visibleFleetList.length}
+                </span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              id="sidebar-btn-drivers"
-              onClick={() => {
-                setCurrentView('dashboard');
-                setFleetTab('drivers');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
-                currentView === 'dashboard' && fleetTab === 'drivers'
-                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
-                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
-              }`}
-            >
-              <Smartphone className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'drivers' ? 'text-[#1c1917]' : 'text-amber-700'}`} />
-              <span className="flex-1">Registered Drivers</span>
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'dashboard' && fleetTab === 'drivers' ? 'bg-[#1c1917] text-white' : 'bg-amber-50 text-amber-900 border border-amber-200'}`}>
-                {driverUsers.length}
-              </span>
-            </button>
+            {(!isSubVendor || vendorPerms.canViewDrivers) && (
+              <button
+                type="button"
+                id="sidebar-btn-drivers"
+                onClick={() => {
+                  setCurrentView('dashboard');
+                  setFleetTab('drivers');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'dashboard' && fleetTab === 'drivers'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <Smartphone className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'drivers' ? 'text-[#1c1917]' : 'text-amber-700'}`} />
+                <span className="flex-1">Registered Drivers</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'dashboard' && fleetTab === 'drivers' ? 'bg-[#1c1917] text-white' : 'bg-amber-50 text-amber-900 border border-amber-200'}`}>
+                  {scopedDriverUsers.length}
+                </span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              id="sidebar-btn-map"
-              onClick={() => {
-                setCurrentView('dashboard');
-                setFleetTab('map');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
-                currentView === 'dashboard' && fleetTab === 'map'
-                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
-                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
-              }`}
-            >
-              <MapIcon className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'map' ? 'text-[#1c1917]' : 'text-cyan-600'}`} />
-              <span className="flex-1">Live GPS Map</span>
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
-              </span>
-            </button>
+            {(!isSubVendor || vendorPerms.canViewMap) && (
+              <button
+                type="button"
+                id="sidebar-btn-map"
+                onClick={() => {
+                  setCurrentView('dashboard');
+                  setFleetTab('map');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'dashboard' && fleetTab === 'map'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <MapIcon className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'map' ? 'text-[#1c1917]' : 'text-cyan-600'}`} />
+                <span className="flex-1">Live GPS Map</span>
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
+                </span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              id="sidebar-btn-attendance"
-              onClick={() => {
-                setCurrentView('dashboard');
-                setFleetTab('attendance');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
-                currentView === 'dashboard' && fleetTab === 'attendance'
-                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
-                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
-              }`}
-            >
-              <UserCheck className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'attendance' ? 'text-[#1c1917]' : 'text-amber-600'}`} />
-              <span className="flex-1">Driver Attendance</span>
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${currentView === 'dashboard' && fleetTab === 'attendance' ? 'bg-[#1c1917] text-amber-300' : 'bg-amber-100 text-amber-900 border border-amber-300'}`}>
-                Punch
-              </span>
-            </button>
+            {(!isSubVendor || vendorPerms.canViewAttendance) && (
+              <button
+                type="button"
+                id="sidebar-btn-attendance"
+                onClick={() => {
+                  setCurrentView('dashboard');
+                  setFleetTab('attendance');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'dashboard' && fleetTab === 'attendance'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <UserCheck className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'attendance' ? 'text-[#1c1917]' : 'text-amber-600'}`} />
+                <span className="flex-1">Driver Attendance</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${currentView === 'dashboard' && fleetTab === 'attendance' ? 'bg-[#1c1917] text-amber-300' : 'bg-amber-100 text-amber-900 border border-amber-300'}`}>
+                  Punch
+                </span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              id="sidebar-btn-reports"
-              onClick={() => {
-                setCurrentView('dashboard');
-                setFleetTab('reports');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
-                currentView === 'dashboard' && fleetTab === 'reports'
-                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
-                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
-              }`}
-            >
-              <FileSpreadsheet className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'reports' ? 'text-[#1c1917]' : 'text-emerald-600'}`} />
-              <span className="flex-1">Location Logs Report</span>
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${currentView === 'dashboard' && fleetTab === 'reports' ? 'bg-[#1c1917] text-white' : 'bg-[#f5f0e6] text-[#57534e] border border-[#ded7c8]'}`}>
-                Audit
-              </span>
-            </button>
+            {(!isSubVendor || vendorPerms.canViewReports) && (
+              <button
+                type="button"
+                id="sidebar-btn-reports"
+                onClick={() => {
+                  setCurrentView('dashboard');
+                  setFleetTab('reports');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'dashboard' && fleetTab === 'reports'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <FileSpreadsheet className={`w-4 h-4 shrink-0 ${currentView === 'dashboard' && fleetTab === 'reports' ? 'text-[#1c1917]' : 'text-emerald-600'}`} />
+                <span className="flex-1">Location Logs Report</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${currentView === 'dashboard' && fleetTab === 'reports' ? 'bg-[#1c1917] text-white' : 'bg-[#f5f0e6] text-[#57534e] border border-[#ded7c8]'}`}>
+                  Audit
+                </span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              id="sidebar-btn-team"
-              onClick={() => {
-                setCurrentView('team');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
-                currentView === 'team'
-                  ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
-                  : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
-              }`}
-            >
-              <Users className={`w-4 h-4 shrink-0 ${currentView === 'team' ? 'text-[#1c1917]' : 'text-indigo-600'}`} />
-              <span className="flex-1">Team Settings</span>
-            </button>
+            {/* Sub-Vendors Management Tab for Master Admin */}
+            {isMasterOrAdmin && (
+              <button
+                type="button"
+                id="sidebar-btn-subvendors"
+                onClick={() => {
+                  setCurrentView('subvendors');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'subvendors'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <Building2 className={`w-4 h-4 shrink-0 ${currentView === 'subvendors' ? 'text-[#1c1917]' : 'text-cyan-700'}`} />
+                <span className="flex-1">Sub-Vendors & Rights</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${currentView === 'subvendors' ? 'bg-[#1c1917] text-white' : 'bg-cyan-50 text-cyan-900 border border-cyan-200'}`}>
+                  {subVendorsList.length}
+                </span>
+              </button>
+            )}
+
+            {!isSubVendor && (
+              <button
+                type="button"
+                id="sidebar-btn-team"
+                onClick={() => {
+                  setCurrentView('team');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2.5 cursor-pointer text-left ${
+                  currentView === 'team'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#57534e] hover:bg-[#f5f0e6] hover:text-[#1c1917]'
+                }`}
+              >
+                <Users className={`w-4 h-4 shrink-0 ${currentView === 'team' ? 'text-[#1c1917]' : 'text-indigo-600'}`} />
+                <span className="flex-1">Team Settings</span>
+              </button>
+            )}
           </div>
 
           {/* Section: Fleet Actions */}
@@ -613,32 +851,36 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             {/* Add Real Cab Single Entry Button */}
-            <button
-              type="button"
-              id="btn-sidebar-add-cab"
-              onClick={() => {
-                setIsAddCabModalOpen(true);
-                setIsMobileMenuOpen(false);
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Cab</span>
-            </button>
+            {(!isSubVendor || vendorPerms.canAddCab) && (
+              <button
+                type="button"
+                id="btn-sidebar-add-cab"
+                onClick={() => {
+                  setIsAddCabModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Cab</span>
+              </button>
+            )}
 
             {/* Upload Fleet List Button */}
-            <button
-              type="button"
-              id="btn-sidebar-upload-fleet"
-              onClick={() => {
-                setIsUploadModalOpen(true);
-                setIsMobileMenuOpen(false);
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer"
-            >
-              <UploadCloud className="w-4 h-4" />
-              <span>Upload Fleet List</span>
-            </button>
+            {(!isSubVendor || vendorPerms.canAddCab) && (
+              <button
+                type="button"
+                id="btn-sidebar-upload-fleet"
+                onClick={() => {
+                  setIsUploadModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer"
+              >
+                <UploadCloud className="w-4 h-4" />
+                <span>Upload Fleet List</span>
+              </button>
+            )}
 
             {/* Driver Mobile Setup Modal Button */}
             <button
@@ -654,20 +896,22 @@ export const AdminDashboard: React.FC = () => {
               <span>Driver Mobile Setup</span>
             </button>
 
-            {/* Purge / Clear Demo Data Button */}
-            <button
-              type="button"
-              id="btn-sidebar-clear-data"
-              onClick={() => {
-                setShowClearConfirm(true);
-                setIsMobileMenuOpen(false);
-              }}
-              className="w-full px-3.5 py-2 rounded-xl bg-transparent hover:bg-rose-50 text-[#78716c] hover:text-rose-600 font-medium text-xs transition flex items-center gap-2 cursor-pointer"
-              title="Purge dummy cabs, duties, and demo data"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Purge Demo Data</span>
-            </button>
+            {/* Purge / Clear Demo Data Button - Master Admin Only */}
+            {isMasterOrAdmin && (
+              <button
+                type="button"
+                id="btn-sidebar-clear-data"
+                onClick={() => {
+                  setShowClearConfirm(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full px-3.5 py-2 rounded-xl bg-transparent hover:bg-rose-50 text-[#78716c] hover:text-rose-600 font-medium text-xs transition flex items-center gap-2 cursor-pointer"
+                title="Purge dummy cabs, duties, and demo data"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Purge Demo Data</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -710,6 +954,62 @@ export const AdminDashboard: React.FC = () => {
 
       {/* MAIN CONTENT AREA - EXPANDED FULL WIDTH */}
       <div className="flex-1 min-w-0 flex flex-col bg-[#f8f6f0]">
+        {/* Banner if Master Admin / Supervisor opened the vendor portal URL (?role=vendor) */}
+        {isVendorDeepLinkInUrl && !isSubVendor && (
+          <div className="bg-cyan-950 text-white px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-cyan-800 text-xs shadow-md">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <div>
+                <span className="font-bold text-cyan-200">Sub-Vendor Portal Link Active:</span>{' '}
+                <span>
+                  You are currently logged in as <strong>{userProfile?.email}</strong> (Role: <span className="uppercase text-amber-300 font-mono font-bold">{userProfile?.role}</span>). To access the sub-vendor portal and see only assigned cabs, sign out and sign in with your vendor account.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                id="btn-switch-to-demo-vendor"
+                onClick={async () => {
+                  try {
+                    await signIn('vendor@fleet.com', 'Vendor@12345');
+                  } catch (e) {
+                    console.error('Failed to switch to demo vendor:', e);
+                  }
+                }}
+                className="px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-[#1c1917] font-bold rounded-lg transition shadow-xs cursor-pointer text-xs"
+              >
+                Switch to Demo Vendor
+              </button>
+              <button
+                type="button"
+                id="btn-signout-for-vendor"
+                onClick={() => signOut()}
+                className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg transition text-xs font-semibold cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Sub-Vendor Active Workspace Status Bar */}
+        {isSubVendor && (
+          <div className="bg-cyan-900 text-white px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs border-b border-cyan-800 shadow-xs">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-cyan-300 shrink-0" />
+              <span>
+                <strong className="text-cyan-200">Sub-Vendor Portal:</strong> {userProfile?.vendorName || userProfile?.name} &bull; Showing only <strong>{visibleFleetList.length} assigned {visibleFleetList.length === 1 ? 'cab' : 'cabs'}</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] bg-cyan-800 text-cyan-200 px-2 py-0.5 rounded font-mono border border-cyan-700">
+                Restricted Vendor View
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Top Header inside main view */}
         <header className="border-b border-[#e6e0d4] bg-white/95 backdrop-blur sticky top-0 z-30 px-4 sm:px-6 lg:px-8 py-3.5 shadow-xs">
           <div className="w-full mx-auto flex items-center justify-between gap-4">
@@ -723,6 +1023,8 @@ export const AdminDashboard: React.FC = () => {
                   ? 'Date-Wise Location Logs Report'
                   : fleetTab === 'attendance'
                   ? 'Driver Attendance Register'
+                  : isSubVendor
+                  ? `${userProfile?.vendorName || 'Vendor'} - Assigned Fleet`
                   : 'Fleet Operations Dashboard'}
               </h2>
               <p className="text-xs text-[#78716c]">
@@ -734,12 +1036,59 @@ export const AdminDashboard: React.FC = () => {
                   ? 'Exportable audit history of duty and location punches'
                   : fleetTab === 'attendance'
                   ? 'Daily biometric & duty attendance punch records (12-Hour continuous shift tracking)'
+                  : isSubVendor
+                  ? `Tracking ${visibleFleetList.length} assigned cabs for ${userProfile?.vendorName || 'your vendor account'}`
                   : `Managing ${fleetList.length} registered vehicles across hubs`}
               </p>
             </div>
 
             {/* Quick Actions in Header */}
             <div className="flex items-center gap-2">
+              {/* Sound Notification Alert Toggle on Location Punch */}
+              <div className="flex items-center gap-1 bg-[#faf7f2] border border-[#ded7c8] rounded-xl p-1 shadow-xs">
+                <button
+                  type="button"
+                  id="btn-toggle-sound-alerts"
+                  onClick={() => {
+                    const next = !isSoundEnabled;
+                    soundNotificationService.setEnabled(next);
+                    setIsSoundEnabled(next);
+                    if (next) {
+                      soundNotificationService.playLocationPunchChime();
+                    }
+                  }}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    isSoundEnabled
+                      ? 'bg-amber-400 text-[#1c1917] shadow-xs'
+                      : 'text-[#78716c] hover:text-[#1c1917]'
+                  }`}
+                  title={isSoundEnabled ? 'Audio Chime is ON: Rings when driver punches location' : 'Audio Chime is MUTED'}
+                >
+                  {isSoundEnabled ? (
+                    <>
+                      <Volume2 className="w-3.5 h-3.5 text-stone-950 shrink-0" />
+                      <span className="hidden sm:inline">Punch Sound: ON</span>
+                    </>
+                  ) : (
+                    <>
+                      <VolumeX className="w-3.5 h-3.5 text-[#78716c] shrink-0" />
+                      <span className="hidden sm:inline">Punch Sound: OFF</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  id="btn-test-punch-sound"
+                  onClick={() => {
+                    soundNotificationService.playLocationPunchChime();
+                  }}
+                  className="px-2 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 rounded-md transition cursor-pointer hidden sm:block"
+                  title="Test location punch audio chime"
+                >
+                  Test
+                </button>
+              </div>
+
               {fleetTab === 'map' && currentView === 'dashboard' && (
                 <button
                   type="button"
@@ -752,35 +1101,85 @@ export const AdminDashboard: React.FC = () => {
                   }`}
                 >
                   <Crosshair className={`w-3.5 h-3.5 ${autoFocusTracking ? 'text-cyan-600 animate-spin' : 'text-[#78716c]'}`} style={{ animationDuration: '6s' }} />
-                  <span>Auto-Focus: {autoFocusTracking ? 'ON' : 'OFF'}</span>
+                  <span className="hidden sm:inline">Auto-Focus: {autoFocusTracking ? 'ON' : 'OFF'}</span>
                 </button>
               )}
 
-              <button
-                type="button"
-                id="btn-header-upload-fleet"
-                onClick={() => setIsUploadModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                title="Bulk upload cabs from Excel or paste from Google Sheets"
-              >
-                <UploadCloud className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Bulk Upload Cabs</span>
-                <span className="sm:hidden">Upload</span>
-              </button>
+              {(!isSubVendor || vendorPerms.canAddCab) && (
+                <button
+                  type="button"
+                  id="btn-header-upload-fleet"
+                  onClick={() => setIsUploadModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                  title="Bulk upload cabs from Excel or paste from Google Sheets"
+                >
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Bulk Upload Cabs</span>
+                  <span className="sm:hidden">Upload</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                id="btn-header-add-cab"
-                onClick={() => setIsAddCabModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                title="Add a single cab"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Add Cab</span>
-              </button>
+              {(!isSubVendor || vendorPerms.canAddCab) && (
+                <button
+                  type="button"
+                  id="btn-header-add-cab"
+                  onClick={() => setIsAddCabModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                  title="Add a single cab"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Add Cab</span>
+                </button>
+              )}
             </div>
           </div>
         </header>
+
+        {/* Punch Notification Audio & Visual Alert Banner */}
+        {punchToast && (
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 p-3.5 rounded-2xl bg-gradient-to-r from-amber-400/25 via-amber-100 to-white border-2 border-amber-400 shadow-md flex items-center justify-between gap-3 animate-in fade-in duration-200">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#1c1917] flex items-center justify-center shrink-0 shadow-xs font-black">
+                <Bell className="w-5 h-5 animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-black text-amber-950 uppercase tracking-wide">
+                    Driver Location Punched!
+                  </span>
+                  <span className="font-mono text-xs font-bold bg-amber-200 text-amber-950 px-2 py-0.5 rounded-md border border-amber-300">
+                    {punchToast.cabNumber}
+                  </span>
+                  <span className="text-[11px] text-[#78716c]">{punchToast.timeStr}</span>
+                </div>
+                <div className="text-xs text-[#1c1917] mt-0.5 font-medium truncate">
+                  <strong>{punchToast.driverName}</strong> punched location:{' '}
+                  <span className="text-amber-900 font-bold">{punchToast.locationText}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setFocusedCabNumber(punchToast.cabNumber);
+                  setFleetTab('map');
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#1c1917] hover:bg-stone-800 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
+              >
+                <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">View on Map</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPunchToast(null)}
+                className="p-1.5 rounded-lg text-stone-500 hover:text-stone-800 hover:bg-stone-200/60 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Main Content Body */}
         <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -830,9 +1229,34 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
 
-          {/* If Team Settings is active */}
-          {currentView === 'team' ? (
+          {/* Sub-Vendor Suspended Notice */}
+          {isSubVendor && userProfile?.status === 'suspended' ? (
+            <div className="p-8 max-w-xl mx-auto my-12 bg-white border-2 border-rose-300 rounded-3xl shadow-xl text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-rose-100 border border-rose-300 flex items-center justify-center mx-auto text-rose-600">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-black text-rose-950">Sub-Vendor Portal Suspended</h3>
+              <p className="text-xs text-[#57534e] leading-relaxed">
+                Access for <strong>{userProfile?.vendorName || 'your vendor account'}</strong> has been temporarily suspended by the Master Administrator. Please contact operations dispatch to restore your fleet access rights.
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="px-4 py-2 rounded-xl bg-stone-900 text-white text-xs font-bold cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          ) : currentView === 'team' ? (
             <TeamSettingsPage onBack={() => setCurrentView('dashboard')} />
+          ) : currentView === 'subvendors' ? (
+            <SubVendorsManagementView
+              fleetList={fleetList || []}
+              subVendors={subVendorsList}
+              onBack={() => setCurrentView('dashboard')}
+            />
           ) : (
             <>
               {/* TWO SUMMARY CARDS: "Cab Off Duty" & "Cabs on Duty" */}
@@ -919,8 +1343,8 @@ export const AdminDashboard: React.FC = () => {
         {/* Tab 0: Registered Drivers List & Account Directory */}
         {fleetTab === 'drivers' && (
           <RegisteredDriversView
-            drivers={driverUsers}
-            fleetList={fleetList}
+            drivers={scopedDriverUsers}
+            fleetList={visibleFleetList}
             currentSupervisorSite={userProfile?.site}
             onOpenBulkUpload={() => setIsUploadModalOpen(true)}
             onOpenAddCab={() => setIsAddCabModalOpen(true)}
@@ -930,7 +1354,7 @@ export const AdminDashboard: React.FC = () => {
         {/* Tab 1: Live Map View */}
         {fleetTab === 'map' && (
           <FleetLiveMapView
-            fleetList={fleetList}
+            fleetList={visibleFleetList}
             focusedCabNumber={focusedCabNumber}
           />
         )}
@@ -976,7 +1400,7 @@ export const AdminDashboard: React.FC = () => {
                       : 'text-[#78716c] hover:text-[#1c1917]'
                   }`}
                 >
-                  All ({fleetList.length})
+                  All ({visibleFleetList.length})
                 </button>
                 <button
                   type="button"
@@ -1034,15 +1458,17 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               {/* Quick Add Cab button in table toolbar */}
-              <button
-                type="button"
-                id="btn-table-toolbar-add-cab"
-                onClick={() => setIsAddCabModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Cab</span>
-              </button>
+              {(!isSubVendor || vendorPerms.canAddCab) && (
+                <button
+                  type="button"
+                  id="btn-table-toolbar-add-cab"
+                  onClick={() => setIsAddCabModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Cab</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1051,7 +1477,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="flex items-center gap-2 text-[11px] text-[#57534e] bg-[#f5f0e6] px-3 py-1.5 rounded-lg border border-[#ded7c8]">
               <Filter className="w-3 h-3 text-amber-700" />
               <span>
-                Showing {filteredAndSortedCabs.length} of {fleetList.length} total cabs
+                Showing {filteredAndSortedCabs.length} of {visibleFleetList.length} {isSubVendor ? 'assigned cabs' : 'total cabs'}
               </span>
               {statusFilter !== 'all' && (
                 <span className="font-semibold text-amber-800">
@@ -1079,39 +1505,53 @@ export const AdminDashboard: React.FC = () => {
           {/* Table Container */}
           <div className="border border-[#e6e0d4] rounded-xl overflow-hidden bg-white">
             {filteredAndSortedCabs.length === 0 ? (
-              <div className="py-16 text-center flex flex-col items-center justify-center text-[#78716c]">
-                <Car className="w-12 h-12 text-[#a8a29e] mb-3" />
-                <p className="text-base font-semibold text-[#1c1917]">
-                  {fleetList.length === 0
-                    ? 'No Cabs in Fleet Registry'
-                    : 'No matching cabs found'}
-                </p>
-                <p className="text-xs text-[#78716c] mt-1 max-w-sm">
-                  {fleetList.length === 0
-                    ? 'Click "Add Cab" or "Upload Fleet List" to register vehicles in the system.'
-                    : 'Try adjusting your search keywords or status filter.'}
-                </p>
-                {fleetList.length === 0 && (
-                  <div className="flex items-center gap-3 mt-4">
-                    <button
-                      type="button"
-                      id="btn-empty-add-cab"
-                      onClick={() => setIsAddCabModalOpen(true)}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Add Real Cab</span>
-                    </button>
-                    <button
-                      type="button"
-                      id="btn-empty-upload-fleet"
-                      onClick={() => setIsUploadModalOpen(true)}
-                      className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <UploadCloud className="w-4 h-4" />
-                      <span>Upload Fleet List</span>
-                    </button>
-                  </div>
+              <div className="py-16 text-center flex flex-col items-center justify-center text-[#78716c] px-4">
+                {isSubVendor && visibleFleetList.length === 0 ? (
+                  <>
+                    <Building2 className="w-12 h-12 text-cyan-600 mb-3" />
+                    <p className="text-base font-bold text-[#1c1917]">
+                      No Cabs Assigned to Your Vendor Account
+                    </p>
+                    <p className="text-xs text-[#78716c] mt-1 max-w-md">
+                      Your vendor profile ({userProfile?.vendorName || userProfile?.name}) currently has no vehicle registration numbers allocated. Please contact the Master Administrator to assign cabs to your company roster.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Car className="w-12 h-12 text-[#a8a29e] mb-3" />
+                    <p className="text-base font-semibold text-[#1c1917]">
+                      {visibleFleetList.length === 0
+                        ? 'No Cabs in Fleet Registry'
+                        : 'No matching cabs found'}
+                    </p>
+                    <p className="text-xs text-[#78716c] mt-1 max-w-sm">
+                      {visibleFleetList.length === 0
+                        ? 'Click "Add Cab" or "Upload Fleet List" to register vehicles in the system.'
+                        : 'Try adjusting your search keywords or status filter.'}
+                    </p>
+                    {visibleFleetList.length === 0 && !isSubVendor && (
+                      <div className="flex items-center gap-3 mt-4">
+                        <button
+                          type="button"
+                          id="btn-empty-add-cab"
+                          onClick={() => setIsAddCabModalOpen(true)}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Add Real Cab</span>
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-empty-upload-fleet"
+                          onClick={() => setIsUploadModalOpen(true)}
+                          className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <UploadCloud className="w-4 h-4" />
+                          <span>Upload Fleet List</span>
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             ) : (
@@ -1445,15 +1885,17 @@ export const AdminDashboard: React.FC = () => {
                                 <span>{focusedCabNumber === cab.cabNumber ? 'Tracking Live' : 'Focus Map'}</span>
                               </button>
 
-                              <button
-                                type="button"
-                                id={`btn-delete-cab-${cab.cabNumber.replace(/[^A-Z0-9]/gi, '-').toLowerCase()}`}
-                                onClick={() => setCabToDelete(cab)}
-                                className="p-1.5 rounded-xl font-bold text-xs transition flex items-center justify-center cursor-pointer shadow-xs active:scale-95 border bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300"
-                                title={`Delete Cab ${cab.cabNumber} from fleet`}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {(!isSubVendor || vendorPerms.canDeleteCab) && (
+                                <button
+                                  type="button"
+                                  id={`btn-delete-cab-${cab.cabNumber.replace(/[^A-Z0-9]/gi, '-').toLowerCase()}`}
+                                  onClick={() => setCabToDelete(cab)}
+                                  className="p-1.5 rounded-xl font-bold text-xs transition flex items-center justify-center cursor-pointer shadow-xs active:scale-95 border bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300"
+                                  title={`Delete Cab ${cab.cabNumber} from fleet`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1470,7 +1912,7 @@ export const AdminDashboard: React.FC = () => {
         {/* Tab 3: Date-Wise Cab Location & Billing Report */}
         {fleetTab === 'reports' && (
           <DateWiseLocationReport
-            fleetList={fleetList}
+            fleetList={visibleFleetList}
             onViewCabOnMap={(cabNo) => {
               setFocusedCabNumber(cabNo);
               setFleetTab('map');
@@ -1481,7 +1923,7 @@ export const AdminDashboard: React.FC = () => {
         {/* Tab 4: Driver Attendance Register (Attendance Punch System) */}
         {fleetTab === 'attendance' && (
           <AttendanceRegisterView
-            fleetList={fleetList}
+            fleetList={visibleFleetList}
             onViewCabOnMap={(cabNo) => {
               setFocusedCabNumber(cabNo);
               setFleetTab('map');

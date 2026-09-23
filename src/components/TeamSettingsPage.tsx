@@ -21,6 +21,7 @@ import {
   generateTemporaryPassword,
   generateDriverEmail,
 } from '../lib/teamManagement';
+import { SubVendorsManagementView } from './SubVendorsManagementView';
 import {
   Users,
   UserPlus,
@@ -45,6 +46,7 @@ import {
   Trash2,
   Clock,
   Radio,
+  Building2,
 } from 'lucide-react';
 
 interface TeamSettingsPageProps {
@@ -58,6 +60,7 @@ export const TeamSettingsPage: React.FC<TeamSettingsPageProps> = ({ onBack }) =>
   const [availableCabs, setAvailableCabs] = useState<FleetCab[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
+  const [activeTab, setActiveTab] = useState<'team' | 'subvendors'>('team');
 
   // Add Member State
   const [isAddingMember, setIsAddingMember] = useState(false);
@@ -419,20 +422,61 @@ export const TeamSettingsPage: React.FC<TeamSettingsPageProps> = ({ onBack }) =>
             </div>
           </div>
 
-          {/* Action button */}
-          <button
-            id="btn-open-add-member"
-            onClick={handleOpenAddForm}
-            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Add Team Member</span>
-          </button>
+          {/* Tab Switcher & Action button */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center bg-[#f5f0e6] p-1 rounded-xl border border-[#ded7c8]">
+              <button
+                type="button"
+                id="tab-team-members"
+                onClick={() => setActiveTab('team')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'team'
+                    ? 'bg-white text-[#1c1917] shadow-xs'
+                    : 'text-[#78716c] hover:text-[#1c1917]'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Supervisors & Drivers</span>
+              </button>
+              <button
+                type="button"
+                id="tab-sub-vendors"
+                onClick={() => setActiveTab('subvendors')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'subvendors'
+                    ? 'bg-amber-400 text-[#1c1917] shadow-xs font-black'
+                    : 'text-[#78716c] hover:text-[#1c1917]'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5 text-cyan-800" />
+                <span>Sub-Vendors & Rights</span>
+              </button>
+            </div>
+
+            {activeTab === 'team' && (
+              <button
+                id="btn-open-add-member"
+                onClick={handleOpenAddForm}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Add Team Member</span>
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        {activeTab === 'subvendors' ? (
+          <SubVendorsManagementView
+            subVendors={teamMembers.filter((m) => m.role === 'sub_vendor')}
+            fleetList={availableCabs || []}
+            onBack={() => setActiveTab('team')}
+          />
+        ) : (
+          <>
         {/* KPI Counter Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white border-2 border-[#e6e0d4] rounded-2xl p-5 flex items-center justify-between shadow-xs">
@@ -728,6 +772,8 @@ export const TeamSettingsPage: React.FC<TeamSettingsPageProps> = ({ onBack }) =>
             )}
           </div>
         </div>
+        </>
+        )}
       </main>
 
       {/* ========================================================================= */}

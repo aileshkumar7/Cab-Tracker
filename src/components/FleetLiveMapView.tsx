@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 
 interface FleetLiveMapViewProps {
-  fleetList: FleetCab[];
+  fleetList?: FleetCab[];
   onAssignDuty?: (cab: FleetCab) => void;
   focusedCabNumber?: string | null;
 }
@@ -118,7 +118,7 @@ function MapFocusManager({ focusedCab }: { focusedCab: FleetCab | null }) {
 }
 
 export const FleetLiveMapView: React.FC<FleetLiveMapViewProps> = ({
-  fleetList,
+  fleetList = [],
   onAssignDuty,
   focusedCabNumber,
 }) => {

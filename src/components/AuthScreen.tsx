@@ -26,18 +26,24 @@ export const AuthScreen: React.FC = () => {
   const { signIn, signUp, error, clearError } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>('login');
 
-  // URL Query parameter checks (e.g. ?role=driver&cab=DL1Z9999)
+  // URL Query parameter checks (e.g. ?role=driver&cab=DL1Z9999 or ?role=vendor)
   const isDriverDeepLink = typeof window !== 'undefined' && (
     new URLSearchParams(window.location.search).get('role') === 'driver' ||
     new URLSearchParams(window.location.search).get('app') === 'driver'
+  );
+  const isVendorDeepLink = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('role') === 'vendor' ||
+    new URLSearchParams(window.location.search).get('role') === 'sub_vendor' ||
+    new URLSearchParams(window.location.search).get('portal') === 'vendor' ||
+    new URLSearchParams(window.location.search).get('app') === 'vendor'
   );
   const initialCabParam = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('cab') || ''
     : '';
 
   // Form states
-  const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [password, setPassword] = useState('');
+  const [emailOrPhone, setEmailOrPhone] = useState(isVendorDeepLink ? 'vendor@fleet.com' : '');
+  const [password, setPassword] = useState(isVendorDeepLink ? 'Vendor@12345' : '');
   const [name, setName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [site, setSite] = useState<string>('North Terminal Hub');
@@ -194,6 +200,36 @@ export const AuthScreen: React.FC = () => {
               >
                 <span>Driver 3</span>
                 <span className="text-[9px] font-mono font-medium text-amber-800">KA01-9901</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Sub-Vendor Quick Access Banner when opened via ?role=vendor */}
+        {isVendorDeepLink && (
+          <div className="mb-4 p-4 rounded-2xl bg-cyan-50 border-2 border-cyan-300 shadow-sm text-cyan-950 text-xs space-y-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-cyan-600 text-white rounded-xl font-bold shrink-0 shadow-xs">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="font-black text-cyan-950 text-sm">Sub-Vendor Portal Access</div>
+                <div className="text-[11px] text-cyan-800 font-medium">Log in to view live GPS map tracking and metrics for your assigned fleet cabs:</div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between bg-white/90 p-2.5 rounded-xl border border-cyan-200">
+              <div className="text-[11px]">
+                <div className="font-bold text-cyan-900">Apex Logistics (Vendor Demo)</div>
+                <div className="font-mono text-[#78716c] text-[10px]">vendor@fleet.com &bull; Assigned: KA-01-AB-1024, KA-01-MG-5588</div>
+              </div>
+              <button
+                type="button"
+                id="btn-quick-deep-vendor"
+                onClick={() => handleQuickDemoLogin('vendor@fleet.com', 'Vendor@12345')}
+                className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs cursor-pointer shadow-xs transition shrink-0 ml-2"
+              >
+                1-Click Sign In
               </button>
             </div>
           </div>
@@ -618,6 +654,26 @@ export const AuthScreen: React.FC = () => {
                 <div className="text-[11px] text-[#57534e] mt-1 font-mono">supervisor2@fleet.com &bull; Tech Park</div>
               </button>
 
+              {/* Sub-Vendor Quick Login */}
+              <button
+                type="button"
+                id="btn-quick-login-subvendor"
+                disabled={isSubmitting}
+                onClick={() => handleQuickDemoLogin('vendor@fleet.com', 'Vendor@12345')}
+                className="p-3 rounded-2xl bg-cyan-50/80 hover:bg-cyan-100/90 border border-cyan-200 text-left transition-all group cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-cyan-700 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-cyan-950">Sub-Vendor (Apex Logistics)</span>
+                  </div>
+                  <span className="text-[9px] bg-cyan-200 text-cyan-900 font-bold px-1.5 py-0.5 rounded">
+                    Vendor
+                  </span>
+                </div>
+                <div className="text-[11px] text-[#57534e] mt-1 font-mono">vendor@fleet.com &bull; Cabs Track</div>
+              </button>
+
               {/* Driver 1 Quick Login */}
               <button
                 type="button"
@@ -741,6 +797,40 @@ export const AuthScreen: React.FC = () => {
                 className="px-2.5 py-1.5 rounded-lg bg-white border border-[#ded7c8] hover:bg-[#f5f0e6] text-[#1c1917] text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
               >
                 {copiedKey === 'supervisor2' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700 font-bold">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Sub-Vendor Creds */}
+            <div className="p-3 rounded-2xl bg-cyan-50/70 border border-cyan-300 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-bold text-cyan-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-cyan-700" />
+                  Sub-Vendor Portal (Apex Logistics &bull; Assigned Cabs Only)
+                </div>
+                <div className="font-mono text-[#1c1917] text-xs mt-0.5">
+                  Email: <span className="text-cyan-800 font-bold">vendor@fleet.com</span>
+                </div>
+                <div className="font-mono text-[#57534e] text-[11px]">
+                  Pass: <span className="text-[#1c1917] font-semibold">Vendor@12345</span> &bull; Cabs: KA-01-AB-1024, KA-01-CD-5588
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-copy-vendor-creds"
+                onClick={() => copyToClipboard('vendor@fleet.com\nVendor@12345', 'vendor')}
+                className="px-2.5 py-1.5 rounded-lg bg-white border border-cyan-300 hover:bg-cyan-50 text-[#1c1917] text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+              >
+                {copiedKey === 'vendor' ? (
                   <>
                     <Check className="w-3.5 h-3.5 text-emerald-600" />
                     <span className="text-emerald-700 font-bold">Copied!</span>

@@ -30,7 +30,12 @@ function MainApp() {
   }
 
   // Role-based routing
-  if (userProfile.role === 'admin' || userProfile.role === 'master_admin' || userProfile.role === 'supervisor') {
+  if (
+    userProfile.role === 'admin' ||
+    userProfile.role === 'master_admin' ||
+    userProfile.role === 'supervisor' ||
+    userProfile.role === 'sub_vendor'
+  ) {
     return <AdminDashboard />;
   }
 

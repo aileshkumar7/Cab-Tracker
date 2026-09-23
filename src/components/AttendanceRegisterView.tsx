@@ -10,7 +10,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { DriverAttendance, DriverSlotType } from '../types';
+import { DriverAttendance, DriverSlotType, FleetCab } from '../types';
 import { formatTimeAgo } from '../lib/timeAgo';
 import { getGoogleMapsUrl } from '../lib/geolocation';
 import {
@@ -31,7 +31,15 @@ import {
   Users,
 } from 'lucide-react';
 
-export const AttendanceRegisterView: React.FC = () => {
+interface AttendanceRegisterViewProps {
+  fleetList?: FleetCab[];
+  onViewCabOnMap?: (cabNumber: string) => void;
+}
+
+export const AttendanceRegisterView: React.FC<AttendanceRegisterViewProps> = ({
+  fleetList,
+  onViewCabOnMap,
+}) => {
   const [attendanceRecords, setAttendanceRecords] = useState<DriverAttendance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -42,6 +50,11 @@ export const AttendanceRegisterView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [slotFilter, setSlotFilter] = useState<'all' | DriverSlotType>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'completed'>('all');
+
+  const allowedCabSet = useMemo(() => {
+    if (!fleetList) return null;
+    return new Set(fleetList.map((c) => (c.cabNumber || '').trim().toUpperCase()));
+  }, [fleetList]);
 
   // Live Firestore subscription
   useEffect(() => {
@@ -77,6 +90,11 @@ export const AttendanceRegisterView: React.FC = () => {
   // Filtered attendance list
   const filteredRecords = useMemo(() => {
     return attendanceRecords.filter((rec) => {
+      // Allowed cabs filter if constrained (e.g. sub-vendor)
+      if (allowedCabSet && rec.cabNumber && !allowedCabSet.has(rec.cabNumber.trim().toUpperCase())) {
+        return false;
+      }
+
       // Date filter
       if (dateFilterMode === 'today' && rec.date !== todayStr) {
         return false;

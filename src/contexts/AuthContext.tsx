@@ -103,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     }
                   } catch {}
 
+                  const isVendor = normEmail.includes('vendor');
                   const isOps = normEmail.includes('supervisor') || normEmail.includes('admin');
                   const newProf: UserProfile = localData ? {
                     ...localData,
@@ -112,7 +113,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     name: user.displayName || normEmail.split('@')[0],
                     email: normEmail,
                     phoneNumber: user.phoneNumber || '',
-                    role: isOps ? 'supervisor' : 'driver',
+                    role: isVendor ? 'sub_vendor' : isOps ? 'supervisor' : 'driver',
+                    vendorName: isVendor ? 'Sub-Vendor Partner' : undefined,
                     createdAt: new Date().toISOString() as any,
                   };
                   await setDoc(userDocRef, { ...newProf, createdAt: serverTimestamp() }, { merge: true });
@@ -213,6 +215,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               const prof = snap.data() as UserProfile;
               setUserProfile(prof);
               localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(prof));
+              return;
+            }
+
+            // Check by email in Firestore in case doc ID differs
+            const qUsers = query(collection(db, 'users'), where('email', '==', normEmail));
+            const snapEmail = await getDocs(qUsers);
+            if (!snapEmail.empty) {
+              const prof = snapEmail.docs[0].data() as UserProfile;
+              const linkedProf: UserProfile = { ...prof, uid: userCredential.user.uid };
+              await setDoc(userDocRef, { ...linkedProf, lastLogin: serverTimestamp() }, { merge: true });
+              setUserProfile(linkedProf);
+              localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(linkedProf));
               return;
             }
           } catch (fetchErr) {
@@ -360,6 +374,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           createdAt: new Date().toISOString() as any,
         };
         await setSessionAndSyncFirestore(demoSupervisor2);
+        return;
+      }
+
+      if (normEmail === 'vendor@fleet.com' || normEmail === 'subvendor@fleet.com') {
+        if (pass !== 'Vendor@12345' && pass !== 'Admin@12345') {
+          const msg = 'Incorrect password for Sub-Vendor.';
+          setError(msg);
+          throw new Error(msg);
+        }
+        const demoSubVendor: UserProfile = {
+          uid: 'vendor-fleet-demo-1',
+          name: 'Vikram Singh',
+          vendorName: 'Apex Logistics & Travels',
+          email: 'vendor@fleet.com',
+          phoneNumber: '+91 98765 77889',
+          role: 'sub_vendor',
+          site: 'North Terminal Hub',
+          status: 'active',
+          assignedCabs: ['KA-01-AB-1024', 'KA-01-MG-5588'],
+          permissions: {
+            canViewMap: true,
+            canViewFleetTable: true,
+            canAssignDuty: true,
+            canViewReports: true,
+            canViewAttendance: true,
+            canAddCab: true,
+            canDeleteCab: false,
+            canExportData: true,
+            canViewDrivers: true,
+          },
+          temporaryPassword: 'Vendor@12345',
+          createdAt: new Date().toISOString() as any,
+        };
+        await setSessionAndSyncFirestore(demoSubVendor);
         return;
       }
 
