@@ -1605,54 +1605,6 @@ export const DriverDutyScreen: React.FC = () => {
             </div>
           )}
 
-          {/* Driver Shift Induction & 2-Driver Roster Card */}
-          <div className="p-3.5 bg-[#faf7f2] rounded-2xl border-2 border-[#e6e0d4] space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center shrink-0">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-black uppercase tracking-wider text-[#78716c]">
-                    Driver Designation
-                  </div>
-                  <div className="text-[#1c1917] font-black text-sm flex items-center gap-1.5 flex-wrap">
-                    <span>
-                      {userProfile?.driverSlot === 'second' ? '2nd Driver' : '1st Driver'}
-                    </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                      Dynamic 12h Shift
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                id="btn-switch-driver-shift"
-                onClick={() => setShowShiftModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-[#f5f0e6] hover:bg-[#eae3d2] text-[#44403c] font-bold text-xs transition flex items-center gap-1 cursor-pointer border border-[#ded7c8] shrink-0"
-                title="Switch between 1st Driver and 2nd Driver"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Switch Role</span>
-              </button>
-            </div>
-
-            {/* Cab Partner Induction Status */}
-            <div className="pt-2 border-t border-[#e6e0d4] flex items-center justify-between text-[11px] text-[#78716c]">
-              <span className="flex items-center gap-1.5 font-medium">
-                <Users className="w-3.5 h-3.5 text-[#a8a29e] shrink-0" />
-                <span>
-                  {userProfile?.driverSlot === 'second'
-                    ? `1st Driver: ${assignedCab?.firstDriverName || 'Available for pairing'}`
-                    : `2nd Driver: ${assignedCab?.secondDriverName || 'Available for pairing'}`}
-                </span>
-              </span>
-              <span className="text-[10px] text-[#a8a29e] font-mono hidden sm:inline">2 Drivers / Cab</span>
-            </div>
-          </div>
-
           {/* Live Status Indicator Bar */}
           <div className="p-4 bg-[#faf7f2] rounded-2xl border-2 border-[#ded7c8] flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1693,6 +1645,232 @@ export const DriverDutyScreen: React.FC = () => {
               {hasActiveDuty ? 'ON DUTY' : currentStatus === 'reported_at_hub' ? 'AVAILABLE' : 'CAB OFF DUTY'}
             </span>
           </div>
+        </div>
+
+        {/* PRIMARY ACTIONS AREA (TRANSFERRED UPWARD: Start Duty / Punch In, Punch Current Location, Enter Manual Location) */}
+        <div id="driver-primary-actions-top" className="space-y-3.5 py-1">
+          {/* GPS Capturing Loading Screen */}
+          {isCapturingGPS ? (
+            <div className="bg-white border-2 border-[#e6e0d4] rounded-3xl p-8 text-center space-y-4 shadow-xl">
+              <div className="w-20 h-20 rounded-full bg-amber-100 border-4 border-amber-400 flex items-center justify-center mx-auto animate-pulse">
+                <Compass className="w-10 h-10 text-amber-600 animate-spin" />
+              </div>
+              <div>
+                <h3 className="font-black text-2xl text-[#1c1917]">Acquiring GPS...</h3>
+                <p className="text-sm text-[#78716c] font-medium mt-1.5 max-w-xs mx-auto">
+                  Capturing phone satellite coordinates for verified punch.
+                </p>
+              </div>
+            </div>
+          ) : pendingAction && capturedLocation ? (
+            /* STEP 2: Location Confirmation Screen */
+            <div
+              id="confirmation-screen"
+              className="bg-white border-4 border-amber-400 rounded-3xl p-5 space-y-4 shadow-xl animate-in zoom-in-95"
+            >
+              <div className="text-center space-y-1">
+                <div className="inline-flex p-3 rounded-2xl bg-amber-100 text-amber-800 mb-1">
+                  <MapPin className="w-8 h-8 stroke-[2.5]" />
+                </div>
+                <h3 className="font-black text-2xl text-[#1c1917] tracking-tight">Confirm Location & Punch</h3>
+                <p className="text-sm text-[#57534e] font-medium">
+                  {pendingAction === 'start_duty'
+                    ? `Confirm starting duty & punch in for Cab ${currentCabNumber} at this location:`
+                    : pendingAction === 'end_duty'
+                    ? `Confirm ending active duty & punch out for Cab ${currentCabNumber} at this location:`
+                    : `Confirm current location punch for Cab ${currentCabNumber} to update dashboard:`}
+                </p>
+              </div>
+
+              {/* Location Address Card */}
+              <div className="bg-[#faf7f2] border-2 border-[#e6e0d4] rounded-2xl p-4 space-y-2 text-left">
+                <div className="text-xs font-black text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Compass className="w-4 h-4 text-amber-700" />
+                  Captured GPS Location
+                </div>
+                <div className="text-base sm:text-lg font-black text-[#1c1917] break-words leading-snug">
+                  {capturedLocation.locationText}
+                </div>
+                <div className="text-xs text-[#78716c] font-mono">
+                  Coordinates: {capturedLocation.latitude.toFixed(5)}, {capturedLocation.longitude.toFixed(5)}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-2 gap-3.5 pt-1">
+                <button
+                  type="button"
+                  id="btn-cancel-action"
+                  disabled={isSubmitting}
+                  onClick={handleCancelConfirmation}
+                  className="w-full min-h-[58px] rounded-2xl bg-[#f5f0e6] hover:bg-[#eae3d2] active:bg-[#ded7c8] text-[#44403c] font-black text-base border-2 border-[#ded7c8] transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-confirm-action"
+                  disabled={isSubmitting}
+                  onClick={handleConfirmAction}
+                  className="w-full min-h-[58px] rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-base sm:text-lg shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-6 h-6 stroke-[3]" />
+                      <span>Confirm Punch</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Normal Action View - Prominently Displayed at Top of Screen */
+            <div className="space-y-3.5">
+              {/* IF DRIVER HAS ACTIVE DUTY: Show "END DUTY / PUNCH OUT" */}
+              {hasActiveDuty ? (
+                <button
+                  type="button"
+                  id="btn-end-duty-punch-out"
+                  onClick={handleInitiateEndDuty}
+                  className="w-full min-h-[95px] rounded-3xl bg-red-600 hover:bg-red-500 active:scale-[0.98] text-white font-black text-xl sm:text-2xl shadow-xl shadow-red-900/20 border-4 border-red-400 transition-all flex items-center justify-between px-6 cursor-pointer"
+                >
+                  <div className="flex items-center gap-4 text-left">
+                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <LogOut className="w-8 h-8 text-white stroke-[2.5]" />
+                    </div>
+                    <div>
+                      <div className="tracking-tight text-xl sm:text-2xl">
+                        END DUTY / PUNCH OUT
+                      </div>
+                      <div className="text-xs sm:text-sm text-red-100 font-semibold mt-0.5">
+                        Complete trip & punch out attendance
+                      </div>
+                    </div>
+                  </div>
+                  <CheckCircle2 className="w-8 h-8 text-red-200 shrink-0 stroke-[2.5]" />
+                </button>
+              ) : (
+                /* IF NO ACTIVE DUTY: Show "START DUTY / PUNCH IN" */
+                <button
+                  type="button"
+                  id="btn-start-duty-punch-in"
+                  onClick={handleInitiateStartDuty}
+                  className="w-full min-h-[95px] rounded-3xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xl sm:text-2xl shadow-xl shadow-emerald-900/20 border-4 border-emerald-400 transition-all flex items-center justify-between px-6 cursor-pointer"
+                >
+                  <div className="flex items-center gap-4 text-left">
+                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <PlayCircle className="w-8 h-8 text-white stroke-[2.5]" />
+                    </div>
+                    <div>
+                      <div className="tracking-tight text-xl sm:text-2xl">
+                        START DUTY / PUNCH IN
+                      </div>
+                      <div className="text-xs sm:text-sm text-emerald-100 font-semibold mt-0.5">
+                        Punch in attendance & start 12h shift
+                      </div>
+                    </div>
+                  </div>
+                  <CheckCircle2 className="w-8 h-8 text-emerald-200 shrink-0 stroke-[2.5]" />
+                </button>
+              )}
+
+              {/* PUNCH CURRENT LOCATION Button */}
+              <button
+                type="button"
+                id="btn-punch-current-location"
+                disabled={isPunchingLocation}
+                onClick={handleInitiatePunchLocation}
+                className={`w-full min-h-[85px] rounded-3xl ${
+                  isPunchingLocation
+                    ? 'bg-cyan-700 cursor-wait'
+                    : 'bg-cyan-600 hover:bg-cyan-500 active:scale-[0.98] cursor-pointer'
+                } text-white font-black text-lg sm:text-xl shadow-lg shadow-cyan-900/20 border-4 border-cyan-400 transition-all flex items-center justify-between px-6`}
+              >
+                <div className="flex items-center gap-3.5 text-left">
+                  <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                    {isPunchingLocation ? (
+                      <RefreshCw className="w-7 h-7 text-white animate-spin" />
+                    ) : (
+                      <MapPin className="w-7 h-7 text-white stroke-[2.5]" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="tracking-tight text-lg sm:text-xl">
+                      {isPunchingLocation ? 'PUNCHING LOCATION...' : 'PUNCH CURRENT LOCATION'}
+                    </div>
+                    <div className="text-xs sm:text-sm text-cyan-100 font-semibold">
+                      {isPunchingLocation
+                        ? 'Capturing GPS & updating Admin Dashboard'
+                        : 'Capture GPS & update location on dashboard'}
+                    </div>
+                  </div>
+                </div>
+                <Compass className={`w-7 h-7 text-cyan-200 shrink-0 stroke-[2.5] ${isPunchingLocation ? 'animate-spin' : ''}`} />
+              </button>
+
+              {/* Enter / Edit Location Manually */}
+              <button
+                type="button"
+                id="btn-open-custom-location-modal"
+                onClick={() => setShowCustomLocationModal(true)}
+                className="w-full py-3.5 px-4 rounded-2xl bg-white hover:bg-[#faf7f2] active:scale-[0.99] text-amber-900 hover:text-amber-950 font-bold text-xs sm:text-sm border-2 border-[#ded7c8] transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              >
+                <Edit3 className="w-4 h-4 text-amber-600" />
+                <span>Enter / Edit Location Manually (Landmark)</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* DETAILS & STATUS AREA (Punched Location, Shift Durations, Roster) */}
+        <div className="bg-white border-2 border-[#e6e0d4] rounded-3xl p-4 sm:p-5 space-y-4 shadow-sm">
+          {/* Current Punched Location Box */}
+          <div className="p-3.5 bg-[#faf7f2] rounded-2xl border-2 border-[#e6e0d4] flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-amber-100 text-amber-800 shrink-0 mt-0.5">
+              <MapPin className="w-4 h-4 stroke-[2.5]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-black uppercase text-amber-900 tracking-wider">
+                Current / Punched Location
+              </div>
+              <div className="text-[#1c1917] font-bold text-xs sm:text-sm mt-0.5 break-words leading-snug">
+                {lastTrackedLocationText || assignedCab?.currentLocationText || 'No GPS punch recorded yet — tap "Punch Current Location" above'}
+              </div>
+              {assignedCab?.lastUpdated && (
+                <div className="text-[10px] text-[#78716c] font-medium mt-1 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-[#a8a29e]" />
+                  <span>Last punched: {formatTimeAgo(assignedCab.lastUpdated)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Active Duty Trip Details */}
+          {hasActiveDuty && (
+            <div className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-4 text-xs sm:text-sm space-y-1.5">
+              <div className="flex items-center justify-between text-emerald-900 font-black">
+                <span className="flex items-center gap-1.5 text-sm">
+                  <Navigation className="w-4 h-4" />
+                  Active Trip in Progress
+                </span>
+                <span className="font-mono text-xs bg-emerald-200 px-2.5 py-1 rounded-lg text-emerald-900 border border-emerald-400">
+                  ON TRIP
+                </span>
+              </div>
+              <div className="text-[#1c1917] flex items-start gap-1.5 pt-1 text-xs sm:text-sm">
+                <MapPin className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                <span>
+                  Start: <strong className="text-[#1c1917] font-bold">{activeDuty?.startLocationText || lastTrackedLocationText || 'Current GPS Location'}</strong>
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* 14-Hour Continuous Duty Duration & 2-Hour Buffer Monitor */}
           {hasActiveDuty && (
@@ -1811,228 +1989,53 @@ export const DriverDutyScreen: React.FC = () => {
             </div>
           )}
 
-          {/* Current Punched Location Box */}
-          <div className="p-3.5 bg-[#faf7f2] rounded-2xl border-2 border-[#e6e0d4] flex items-start gap-3">
-            <div className="p-2 rounded-xl bg-amber-100 text-amber-800 shrink-0 mt-0.5">
-              <MapPin className="w-4 h-4 stroke-[2.5]" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[11px] font-black uppercase text-amber-900 tracking-wider">
-                Current / Punched Location
-              </div>
-              <div className="text-[#1c1917] font-bold text-xs sm:text-sm mt-0.5 break-words leading-snug">
-                {lastTrackedLocationText || assignedCab?.currentLocationText || 'No GPS punch recorded yet — tap "Punch Current Location" below'}
-              </div>
-              {assignedCab?.lastUpdated && (
-                <div className="text-[10px] text-[#78716c] font-medium mt-1 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-[#a8a29e]" />
-                  <span>Last punched: {formatTimeAgo(assignedCab.lastUpdated)}</span>
+          {/* Driver Shift Induction & 2-Driver Roster Card */}
+          <div className="p-3.5 bg-[#faf7f2] rounded-2xl border-2 border-[#e6e0d4] space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center shrink-0">
+                  <UserCheck className="w-5 h-5" />
                 </div>
-              )}
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-wider text-[#78716c]">
+                    Driver Designation
+                  </div>
+                  <div className="text-[#1c1917] font-black text-sm flex items-center gap-1.5 flex-wrap">
+                    <span>
+                      {userProfile?.driverSlot === 'second' ? '2nd Driver' : '1st Driver'}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                      Dynamic 12h Shift
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn-switch-driver-shift"
+                onClick={() => setShowShiftModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-[#f5f0e6] hover:bg-[#eae3d2] text-[#44403c] font-bold text-xs transition flex items-center gap-1 cursor-pointer border border-[#ded7c8] shrink-0"
+                title="Switch between 1st Driver and 2nd Driver"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Switch Role</span>
+              </button>
+            </div>
+
+            {/* Cab Partner Induction Status */}
+            <div className="pt-2 border-t border-[#e6e0d4] flex items-center justify-between text-[11px] text-[#78716c]">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Users className="w-3.5 h-3.5 text-[#a8a29e] shrink-0" />
+                <span>
+                  {userProfile?.driverSlot === 'second'
+                    ? `1st Driver: ${assignedCab?.firstDriverName || 'Available for pairing'}`
+                    : `2nd Driver: ${assignedCab?.secondDriverName || 'Available for pairing'}`}
+                </span>
+              </span>
+              <span className="text-[10px] text-[#a8a29e] font-mono hidden sm:inline">2 Drivers / Cab</span>
             </div>
           </div>
-
-          {/* Active Duty Trip Details */}
-          {hasActiveDuty && (
-            <div className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-4 text-xs sm:text-sm space-y-1.5">
-              <div className="flex items-center justify-between text-emerald-900 font-black">
-                <span className="flex items-center gap-1.5 text-sm">
-                  <Navigation className="w-4 h-4" />
-                  Active Trip in Progress
-                </span>
-                <span className="font-mono text-xs bg-emerald-200 px-2.5 py-1 rounded-lg text-emerald-900 border border-emerald-400">
-                  ON TRIP
-                </span>
-              </div>
-              <div className="text-[#1c1917] flex items-start gap-1.5 pt-1 text-xs sm:text-sm">
-                <MapPin className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                <span>
-                  Start: <strong className="text-[#1c1917] font-bold">{activeDuty?.startLocationText || lastTrackedLocationText || 'Current GPS Location'}</strong>
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* PRIMARY ACTIONS AREA */}
-        <div className="flex-1 flex flex-col justify-center space-y-4 py-2">
-          {/* GPS Capturing Loading Screen */}
-          {isCapturingGPS ? (
-            <div className="bg-white border-2 border-[#e6e0d4] rounded-3xl p-8 text-center space-y-4 shadow-xl">
-              <div className="w-20 h-20 rounded-full bg-amber-100 border-4 border-amber-400 flex items-center justify-center mx-auto animate-pulse">
-                <Compass className="w-10 h-10 text-amber-600 animate-spin" />
-              </div>
-              <div>
-                <h3 className="font-black text-2xl text-[#1c1917]">Acquiring GPS...</h3>
-                <p className="text-sm text-[#78716c] font-medium mt-1.5 max-w-xs mx-auto">
-                  Capturing phone satellite coordinates for verified punch.
-                </p>
-              </div>
-            </div>
-          ) : pendingAction && capturedLocation ? (
-            /* STEP 2: Location Confirmation Screen */
-            <div
-              id="confirmation-screen"
-              className="bg-white border-4 border-amber-400 rounded-3xl p-5 space-y-4 shadow-xl animate-in zoom-in-95"
-            >
-              <div className="text-center space-y-1">
-                <div className="inline-flex p-3 rounded-2xl bg-amber-100 text-amber-800 mb-1">
-                  <MapPin className="w-8 h-8 stroke-[2.5]" />
-                </div>
-                <h3 className="font-black text-2xl text-[#1c1917] tracking-tight">Confirm Location & Punch</h3>
-                <p className="text-sm text-[#57534e] font-medium">
-                  {pendingAction === 'start_duty'
-                    ? `Confirm starting duty & punch in for Cab ${currentCabNumber} at this location:`
-                    : pendingAction === 'end_duty'
-                    ? `Confirm ending active duty & punch out for Cab ${currentCabNumber} at this location:`
-                    : `Confirm current location punch for Cab ${currentCabNumber} to update dashboard:`}
-                </p>
-              </div>
-
-              {/* Location Address Card */}
-              <div className="bg-[#faf7f2] border-2 border-[#e6e0d4] rounded-2xl p-4 space-y-2 text-left">
-                <div className="text-xs font-black text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-                  <Compass className="w-4 h-4 text-amber-700" />
-                  Captured GPS Location
-                </div>
-                <div className="text-base sm:text-lg font-black text-[#1c1917] break-words leading-snug">
-                  {capturedLocation.locationText}
-                </div>
-                <div className="text-xs text-[#78716c] font-mono">
-                  Coordinates: {capturedLocation.latitude.toFixed(5)}, {capturedLocation.longitude.toFixed(5)}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="grid grid-cols-2 gap-3.5 pt-1">
-                <button
-                  type="button"
-                  id="btn-cancel-action"
-                  disabled={isSubmitting}
-                  onClick={handleCancelConfirmation}
-                  className="w-full min-h-[58px] rounded-2xl bg-[#f5f0e6] hover:bg-[#eae3d2] active:bg-[#ded7c8] text-[#44403c] font-black text-base border-2 border-[#ded7c8] transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  id="btn-confirm-action"
-                  disabled={isSubmitting}
-                  onClick={handleConfirmAction}
-                  className="w-full min-h-[58px] rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-base sm:text-lg shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-6 h-6 stroke-[3]" />
-                      <span>Confirm Punch</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Normal Action View */
-            <div className="space-y-4">
-              {/* IF DRIVER HAS ACTIVE DUTY: Show "END DUTY / PUNCH OUT" */}
-              {hasActiveDuty ? (
-                <button
-                  type="button"
-                  id="btn-end-duty-punch-out"
-                  onClick={handleInitiateEndDuty}
-                  className="w-full min-h-[105px] rounded-3xl bg-red-600 hover:bg-red-500 active:scale-[0.98] text-white font-black text-xl sm:text-2xl shadow-xl shadow-red-900/20 border-4 border-red-400 transition-all flex items-center justify-between px-6 cursor-pointer"
-                >
-                  <div className="flex items-center gap-4 text-left">
-                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                      <LogOut className="w-8 h-8 text-white stroke-[2.5]" />
-                    </div>
-                    <div>
-                      <div className="tracking-tight text-xl sm:text-2xl">
-                        END DUTY / PUNCH OUT
-                      </div>
-                      <div className="text-xs sm:text-sm text-red-100 font-semibold mt-0.5">
-                        Complete trip & punch out attendance
-                      </div>
-                    </div>
-                  </div>
-                  <CheckCircle2 className="w-8 h-8 text-red-200 shrink-0 stroke-[2.5]" />
-                </button>
-              ) : (
-                /* IF NO ACTIVE DUTY: Show "START DUTY / PUNCH IN" */
-                <button
-                  type="button"
-                  id="btn-start-duty-punch-in"
-                  onClick={handleInitiateStartDuty}
-                  className="w-full min-h-[105px] rounded-3xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xl sm:text-2xl shadow-xl shadow-emerald-900/20 border-4 border-emerald-400 transition-all flex items-center justify-between px-6 cursor-pointer"
-                >
-                  <div className="flex items-center gap-4 text-left">
-                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                      <PlayCircle className="w-8 h-8 text-white stroke-[2.5]" />
-                    </div>
-                    <div>
-                      <div className="tracking-tight text-xl sm:text-2xl">
-                        START DUTY / PUNCH IN
-                      </div>
-                      <div className="text-xs sm:text-sm text-emerald-100 font-semibold mt-0.5">
-                        Punch in attendance & start 12h shift
-                      </div>
-                    </div>
-                  </div>
-                  <CheckCircle2 className="w-8 h-8 text-emerald-200 shrink-0 stroke-[2.5]" />
-                </button>
-              )}
-
-              {/* PUNCH CURRENT LOCATION Button */}
-              <button
-                type="button"
-                id="btn-punch-current-location"
-                disabled={isPunchingLocation}
-                onClick={handleInitiatePunchLocation}
-                className={`w-full min-h-[90px] rounded-3xl ${
-                  isPunchingLocation
-                    ? 'bg-cyan-700 cursor-wait'
-                    : 'bg-cyan-600 hover:bg-cyan-500 active:scale-[0.98] cursor-pointer'
-                } text-white font-black text-lg sm:text-xl shadow-lg shadow-cyan-900/20 border-4 border-cyan-400 transition-all flex items-center justify-between px-6`}
-              >
-                <div className="flex items-center gap-3.5 text-left">
-                  <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                    {isPunchingLocation ? (
-                      <RefreshCw className="w-7 h-7 text-white animate-spin" />
-                    ) : (
-                      <MapPin className="w-7 h-7 text-white stroke-[2.5]" />
-                    )}
-                  </div>
-                  <div>
-                    <div className="tracking-tight text-lg sm:text-xl">
-                      {isPunchingLocation ? 'PUNCHING LOCATION...' : 'PUNCH CURRENT LOCATION'}
-                    </div>
-                    <div className="text-xs sm:text-sm text-cyan-100 font-semibold">
-                      {isPunchingLocation
-                        ? 'Capturing GPS & updating Admin Dashboard'
-                        : 'Capture GPS & update location on dashboard'}
-                    </div>
-                  </div>
-                </div>
-                <Compass className={`w-7 h-7 text-cyan-200 shrink-0 stroke-[2.5] ${isPunchingLocation ? 'animate-spin' : ''}`} />
-              </button>
-
-              {/* Enter / Edit Location Manually */}
-              <button
-                type="button"
-                id="btn-open-custom-location-modal"
-                onClick={() => setShowCustomLocationModal(true)}
-                className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-[#faf7f2] active:scale-[0.99] text-amber-900 hover:text-amber-950 font-bold text-xs sm:text-sm border-2 border-[#ded7c8] transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              >
-                <Edit3 className="w-4 h-4 text-amber-600" />
-                <span>Enter / Edit Location Manually (Landmark)</span>
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Footer info */}

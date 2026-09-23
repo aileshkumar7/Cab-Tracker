@@ -1006,6 +1006,16 @@ export const AdminDashboard: React.FC = () => {
               <span className="text-[11px] bg-cyan-800 text-cyan-200 px-2 py-0.5 rounded font-mono border border-cyan-700">
                 Restricted Vendor View
               </span>
+              <button
+                type="button"
+                id="btn-subvendor-bar-signout"
+                onClick={() => signOut()}
+                className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition flex items-center gap-1 cursor-pointer shadow-xs"
+                title="Sign out of Vendor Portal"
+              >
+                <LogOut className="w-3 h-3 text-white shrink-0" />
+                <span>Sign Out</span>
+              </button>
             </div>
           </div>
         )}
@@ -1131,6 +1141,18 @@ export const AdminDashboard: React.FC = () => {
                   <span className="hidden sm:inline">Add Cab</span>
                 </button>
               )}
+
+              {/* Prominent Sign Out Button on top right corner for Admin & Vendor Dashboards */}
+              <button
+                type="button"
+                id="btn-header-top-signout"
+                onClick={() => signOut()}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 hover:text-rose-800 border border-rose-300 font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                title={`Sign out of ${isSubVendor ? userProfile?.vendorName || 'Vendor' : 'Admin'} Dashboard`}
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-600 shrink-0 stroke-[2.5]" />
+                <span className="inline font-bold">Sign Out</span>
+              </button>
             </div>
           </div>
         </header>
