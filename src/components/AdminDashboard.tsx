@@ -15,7 +15,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { FleetCab, FleetCabStatus, UserProfile, DEFAULT_SUB_VENDOR_PERMISSIONS } from '../types';
+import { FleetCab, FleetCabStatus, UserProfile, DEFAULT_SUB_VENDOR_PERMISSIONS, normalizeCab, cleanCabForCompare } from '../types';
 import { clearAllFleetData } from '../lib/clearData';
 import { FleetMasterUpload } from './FleetMasterUpload';
 import { AssignDutyModal } from './AssignDutyModal';
@@ -91,6 +91,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Sound Notification state
   const [isSoundEnabled, setIsSoundEnabled] = useState(() => soundNotificationService.isEnabled());
+  const [recentlyPunchedCab, setRecentlyPunchedCab] = useState<string | null>(null);
   const [punchToast, setPunchToast] = useState<{
     driverName: string;
     cabNumber: string;
@@ -317,6 +318,12 @@ export const AdminDashboard: React.FC = () => {
               // Play Web Audio Chime!
               soundNotificationService.playLocationPunchChime();
 
+              // Highlight recently punched cab with emerald ring & Standing Free alert badge
+              setRecentlyPunchedCab(punchedCab);
+              setTimeout(() => {
+                setRecentlyPunchedCab((curr) => (curr === punchedCab ? null : curr));
+              }, 12000);
+
               // Show Rich Notification Banner
               const nowTime = new Date().toLocaleTimeString([], {
                 hour: '2-digit',
@@ -333,7 +340,7 @@ export const AdminDashboard: React.FC = () => {
 
               setTimeout(() => {
                 setPunchToast((curr) => (curr?.cabNumber === punchedCab ? null : curr));
-              }, 7000);
+              }, 8000);
             }
           }
         });
@@ -1159,24 +1166,27 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Punch Notification Audio & Visual Alert Banner */}
         {punchToast && (
-          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 p-3.5 rounded-2xl bg-gradient-to-r from-amber-400/25 via-amber-100 to-white border-2 border-amber-400 shadow-md flex items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/20 via-emerald-100 to-white border-2 border-emerald-500 shadow-md flex items-center justify-between gap-3 animate-in fade-in duration-200">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#1c1917] flex items-center justify-center shrink-0 shadow-xs font-black">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs font-black">
                 <Bell className="w-5 h-5 animate-bounce" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-black text-amber-950 uppercase tracking-wide">
-                    Driver Location Punched!
+                  <span className="text-xs font-black text-emerald-950 uppercase tracking-wide">
+                    Driver Location Punched &bull; Standing Free
                   </span>
-                  <span className="font-mono text-xs font-bold bg-amber-200 text-amber-950 px-2 py-0.5 rounded-md border border-amber-300">
+                  <span className="font-mono text-xs font-bold bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded-md border border-emerald-300">
                     {punchToast.cabNumber}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-xs">
+                    Free
                   </span>
                   <span className="text-[11px] text-[#78716c]">{punchToast.timeStr}</span>
                 </div>
                 <div className="text-xs text-[#1c1917] mt-0.5 font-medium truncate">
-                  <strong>{punchToast.driverName}</strong> punched location:{' '}
-                  <span className="text-amber-900 font-bold">{punchToast.locationText}</span>
+                  <strong>{punchToast.driverName}</strong> punched location — standing <strong>Free</strong> at:{' '}
+                  <span className="text-emerald-950 font-bold">{punchToast.locationText}</span>
                 </div>
               </div>
             </div>
@@ -1645,22 +1655,34 @@ export const AdminDashboard: React.FC = () => {
                   <tbody className="divide-y divide-[#e6e0d4] font-sans">
                     {filteredAndSortedCabs.map((cab) => {
                       const isOnDuty = cab.status === 'on_duty';
+                      const isRecentlyPunched = Boolean(
+                        recentlyPunchedCab &&
+                        (normalizeCab(cab.cabNumber) === normalizeCab(recentlyPunchedCab) ||
+                         cleanCabForCompare(cab.cabNumber) === cleanCabForCompare(recentlyPunchedCab))
+                      );
 
                       return (
                         <tr
                           key={cab.id || cab.cabNumber}
-                          className={`transition-colors ${
-                            focusedCabNumber === cab.cabNumber
+                          className={`transition-all duration-500 ${
+                            isRecentlyPunched
+                              ? 'bg-emerald-50/95 ring-2 ring-emerald-500 shadow-sm'
+                              : focusedCabNumber === cab.cabNumber
                               ? 'bg-cyan-50/80 ring-1 ring-cyan-400/40'
                               : 'hover:bg-[#faf7f2]/80'
                           }`}
                         >
                           {/* Cab Number */}
                           <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-mono font-bold text-[#1c1917] text-sm">
                                 {cab.cabNumber}
                               </span>
+                              {isRecentlyPunched && (
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-950 border border-emerald-500 animate-pulse flex items-center gap-1 shadow-2xs">
+                                  <span>🔔</span> Just Punched Free
+                                </span>
+                              )}
                               {focusedCabNumber === cab.cabNumber && (
                                 <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-cyan-100 text-cyan-900 border border-cyan-300">
                                   Tracked
@@ -1844,27 +1866,20 @@ export const AdminDashboard: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  {/* "Cab Off Duty" Tag under Ideal Standing Location */}
+                                  {/* Standing Free Badge under Ideal Standing Location */}
                                   <div className="flex items-center gap-2 pt-0.5 flex-wrap">
-                                    {!isOnDuty ? (
-                                      <span
-                                        id={`tag-standing-free-${cab.cabNumber}`}
-                                        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-950 border border-emerald-400 shadow-xs uppercase tracking-wider"
-                                        title="Cab is Standing Free at this location"
-                                      >
-                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                                        Free
-                                      </span>
-                                    ) : (
-                                      <span
-                                        id={`tag-standing-onduty-${cab.cabNumber}`}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-900 border border-blue-300 shadow-xs"
-                                        title="Vehicle is currently On Duty"
-                                      >
-                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                                        On Duty
-                                      </span>
-                                    )}
+                                    <span
+                                      id={`tag-standing-free-${cab.cabNumber}`}
+                                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all duration-300 ${
+                                        isRecentlyPunched
+                                          ? 'bg-emerald-200 text-emerald-950 border-2 border-emerald-500 ring-2 ring-emerald-300 shadow-md scale-105'
+                                          : 'bg-emerald-100 text-emerald-950 border border-emerald-400 shadow-xs'
+                                      }`}
+                                      title="Cab is Standing Free at this location"
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                                      Free
+                                    </span>
 
                                     {isPunched && (
                                       <span
@@ -1874,6 +1889,12 @@ export const AdminDashboard: React.FC = () => {
                                       >
                                         <CheckCircle2 className="w-3 h-3 text-teal-600 shrink-0" />
                                         Punched Location
+                                      </span>
+                                    )}
+
+                                    {isRecentlyPunched && (
+                                      <span className="inline-flex items-center gap-1 text-[9px] font-black text-emerald-900 bg-emerald-200/90 px-2 py-0.5 rounded-full border border-emerald-400 shadow-2xs animate-bounce">
+                                        🔔 Free Standing Alert
                                       </span>
                                     )}
 

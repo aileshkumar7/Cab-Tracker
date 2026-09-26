@@ -624,7 +624,8 @@ export const DriverDutyScreen: React.FC = () => {
         });
       }
 
-      const updatedStatus: FleetCabStatus = activeDuty ? 'on_duty' : 'free';
+      // When driver punches location, cab standing status and vehicle status is Free at this punched location
+      const updatedStatus: FleetCabStatus = 'free';
 
       if (docId) {
         setFleetDocId(docId);
@@ -632,7 +633,8 @@ export const DriverDutyScreen: React.FC = () => {
           cabNumber: activeCabNumber,
           driverName,
           driverPhone,
-          status: updatedStatus,
+          status: 'free',
+          standingStatus: 'free',
           currentLocationLat: location.latitude,
           currentLocationLng: location.longitude,
           currentLocationText: location.locationText,
@@ -649,7 +651,8 @@ export const DriverDutyScreen: React.FC = () => {
           driverPhone,
           vehicleType: 'Commercial Sedan',
           baseHub: 'Main Hub',
-          status: updatedStatus,
+          status: 'free',
+          standingStatus: 'free',
           currentLocationLat: location.latitude,
           currentLocationLng: location.longitude,
           currentLocationText: location.locationText,
@@ -1099,14 +1102,15 @@ export const DriverDutyScreen: React.FC = () => {
         setActiveDuty(null);
         setSuccessMessage('Duty ended. Cab is now Off Duty.');
       } else if (pendingAction === 'punch_location') {
-        // 1. Update "fleet" document for that cab with new GPS coordinates, address, and punched location
+        // 1. Update "fleet" document for that cab with new GPS coordinates, address, and punched location (Free standing status)
         let targetDocId = fleetDocId || assignedCab?.id;
         if (targetDocId) {
           await updateDoc(doc(db, 'fleet', targetDocId), {
             cabNumber,
             driverName,
             driverPhone,
-            status: activeDuty ? 'on_duty' : 'free',
+            status: 'free',
+            standingStatus: 'free',
             currentLocationLat: capturedLocation.latitude,
             currentLocationLng: capturedLocation.longitude,
             currentLocationText: capturedLocation.locationText,
@@ -1125,7 +1129,8 @@ export const DriverDutyScreen: React.FC = () => {
             await updateDoc(doc(db, 'fleet', docId), {
               driverName,
               driverPhone,
-              status: activeDuty ? 'on_duty' : 'free',
+              status: 'free',
+              standingStatus: 'free',
               currentLocationLat: capturedLocation.latitude,
               currentLocationLng: capturedLocation.longitude,
               currentLocationText: capturedLocation.locationText,
@@ -1142,7 +1147,8 @@ export const DriverDutyScreen: React.FC = () => {
               driverPhone,
               vehicleType: 'Commercial Sedan',
               baseHub: 'Main Hub',
-              status: activeDuty ? 'on_duty' : 'cab_off_duty',
+              status: 'free',
+              standingStatus: 'free',
               currentLocationLat: capturedLocation.latitude,
               currentLocationLng: capturedLocation.longitude,
               currentLocationText: capturedLocation.locationText,

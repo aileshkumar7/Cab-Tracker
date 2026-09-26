@@ -60,6 +60,7 @@ export interface FleetCab {
   site?: string; // Bound site / location
   vendorName?: string; // Sub-Vendor company name if owned/supplied by a vendor
   status: FleetCabStatus;
+  standingStatus?: 'free' | 'on_duty' | 'pending';
   currentLocationText: string;
   currentLocationLat: number;
   currentLocationLng: number;
