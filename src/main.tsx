@@ -3,21 +3,28 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Clean up service workers in dev mode to prevent request interception / rate-limiting loops in preview
+// Register service worker for PWA installability and mobile icon caching
 if ('serviceWorker' in navigator) {
-  if (import.meta.env.PROD) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.log('SW registration note:', err);
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        // If an update is found, activate it
+        reg.onupdatefound = () => {
+          const installingWorker = reg.installing;
+          if (installingWorker) {
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('New PWA service worker installed.');
+              }
+            };
+          }
+        };
+      })
+      .catch((err) => {
+        console.log('PWA ServiceWorker registration note:', err);
       });
-    });
-  } else {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      for (const registration of registrations) {
-        registration.unregister();
-      }
-    });
-  }
+  });
 }
 
 createRoot(document.getElementById('root')!).render(

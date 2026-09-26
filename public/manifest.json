@@ -4,11 +4,12 @@
   "description": "Mobile duty punch-in/out and hub reporting app for fleet drivers.",
   "start_url": "/?role=driver",
   "scope": "/",
-  "id": "/driver-app",
+  "id": "/",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#0f172a",
+  "background_color": "#1b2331",
+  "theme_color": "#f59e0b",
   "orientation": "portrait-primary",
+  "categories": ["business", "travel", "productivity"],
   "icons": [
     {
       "src": "/icon-192.png",
@@ -33,6 +34,18 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }

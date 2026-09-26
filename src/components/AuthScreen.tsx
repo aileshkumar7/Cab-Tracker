@@ -143,8 +143,15 @@ export const AuthScreen: React.FC = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md px-4">
         {/* Brand Header */}
         <div className="flex items-center justify-center space-x-3 mb-3">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
-            <Car className="w-7 h-7 text-stone-950 font-bold" />
+          <div className="w-12 h-12 rounded-2xl overflow-hidden bg-[#1b2331] p-1 border-2 border-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
+            <img
+              src="/icon-192.png"
+              alt="Cab Fleet Tracker"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/icon.svg';
+              }}
+            />
           </div>
           <div>
             <h1 className="text-2xl font-black tracking-tight text-[#1c1917] flex items-center gap-2">

@@ -155,9 +155,12 @@ export const DriverDutyScreen: React.FC = () => {
   const [showShiftModal, setShowShiftModal] = useState(false);
   const [isSwitchingShift, setIsSwitchingShift] = useState(false);
 
-  // PWA Install Prompt state
+  // PWA Install Prompt state & Device Detection
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
 
   // Update pending queue count
   const refreshPendingCount = useCallback(() => {
@@ -209,25 +212,50 @@ export const DriverDutyScreen: React.FC = () => {
     };
   }, [refreshPendingCount, triggerOfflineSync]);
 
-  // Catch PWA beforeinstallprompt event
+  // Catch PWA beforeinstallprompt event & detect installation status
   useEffect(() => {
+    // Check if already running in standalone mode (installed PWA)
+    const isStandalone =
+      (typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches) ||
+      (typeof navigator !== 'undefined' && (navigator as any).standalone === true);
+    setIsInstalled(isStandalone);
+
+    // Detect iOS devices (iPhone, iPad, iPod)
+    const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
+    const isAppleDevice = /iphone|ipad|ipod/.test(userAgent);
+    setIsIOS(isAppleDevice);
+
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
       setIsInstallable(true);
     };
 
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setIsInstallable(false);
+      setDeferredPrompt(null);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
   }, []);
 
   const handleInstallPWA = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstallable(false);
-      setDeferredPrompt(null);
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstallable(false);
+        setIsInstalled(true);
+        setDeferredPrompt(null);
+      }
+    } else if (isIOS) {
+      setShowIOSInstallGuide(true);
     }
   };
 
@@ -1338,12 +1366,15 @@ export const DriverDutyScreen: React.FC = () => {
         {/* Top Header Bar */}
         <header className="bg-white border-2 border-[#e6e0d4] rounded-3xl p-4 flex items-center justify-between shadow-xs">
           <div className="flex items-center space-x-3.5">
-            <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-md shadow-amber-500/20 shrink-0 border-2 border-amber-400/40 bg-white flex items-center justify-center p-1">
+            <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-md shadow-amber-500/20 shrink-0 border-2 border-amber-400/40 bg-[#1b2331] flex items-center justify-center p-1">
               <img
                 src="/icon-192.png"
                 alt="Cab Driver Logo"
                 className="w-full h-full object-contain"
                 referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/icon.svg';
+                }}
               />
             </div>
             <div>
@@ -1429,23 +1460,26 @@ export const DriverDutyScreen: React.FC = () => {
           )}
         </div>
 
-        {/* PWA Install Banner if supported */}
-        {isInstallable && (
+        {/* PWA Install Banner if not installed */}
+        {!isInstalled && (isInstallable || isIOS) && (
           <div className="bg-white border-2 border-amber-300 rounded-2xl p-3.5 flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-xs shrink-0 border-2 border-amber-400/40 bg-white flex items-center justify-center p-0.5">
+              <div className="w-11 h-11 rounded-xl overflow-hidden shadow-xs shrink-0 border-2 border-amber-400/50 bg-[#1b2331] flex items-center justify-center p-0.5">
                 <img
                   src="/icon-192.png"
                   alt="Taxi Driver Badge Icon"
                   className="w-full h-full object-contain"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/icon.svg';
+                  }}
                 />
               </div>
               <div>
                 <div className="text-sm font-bold text-[#1c1917] flex items-center gap-1.5">
-                  <span>Add Cab Driver to Home Screen</span>
+                  <span>Add Cab Driver to Phone</span>
                 </div>
-                <div className="text-xs text-[#78716c]">Install app with official taxi badge logo</div>
+                <div className="text-xs text-[#78716c]">Install with golden taxi logo launcher</div>
               </div>
             </div>
             <button
@@ -1454,7 +1488,7 @@ export const DriverDutyScreen: React.FC = () => {
               onClick={handleInstallPWA}
               className="min-h-[44px] px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#1c1917] font-black text-xs shadow-xs transition shrink-0 flex items-center cursor-pointer"
             >
-              Install
+              {isIOS ? 'How to Add' : 'Install'}
             </button>
           </div>
         )}
@@ -2287,6 +2321,78 @@ export const DriverDutyScreen: React.FC = () => {
                 </div>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* iOS Safari Home Screen Install Guide Modal */}
+      {showIOSInstallGuide && (
+        <div
+          id="modal-ios-install-guide"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in"
+        >
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border-2 border-amber-300 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl overflow-hidden bg-[#1b2331] p-0.5 border border-amber-400 shrink-0">
+                  <img
+                    src="/icon-192.png"
+                    alt="Cab Driver Logo"
+                    className="w-full h-full object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/icon.svg';
+                    }}
+                  />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1c1917]">Add to iPhone Screen</h3>
+                  <p className="text-[11px] text-[#78716c]">Display official Cab Driver icon</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIOSInstallGuide(false)}
+                className="w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center cursor-pointer font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 bg-[#faf7f2] p-4 rounded-2xl border border-[#ded7c8] text-xs text-[#44403c]">
+              <div className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 font-bold flex items-center justify-center shrink-0 text-xs">
+                  1
+                </span>
+                <p className="leading-snug">
+                  Tap the <strong>Share</strong> button <span className="inline-block px-1.5 py-0.5 rounded bg-white border border-stone-300 font-mono text-[10px]">⎋ / [↑]</span> at the bottom of Safari.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 font-bold flex items-center justify-center shrink-0 text-xs">
+                  2
+                </span>
+                <p className="leading-snug">
+                  Scroll down the menu and tap <strong>Add to Home Screen</strong>.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 font-bold flex items-center justify-center shrink-0 text-xs">
+                  3
+                </span>
+                <p className="leading-snug">
+                  Confirm the name <strong>Cab Driver</strong> and tap <strong>Add</strong> at top right. The golden taxi badge logo will now appear on your phone screen!
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowIOSInstallGuide(false)}
+              className="w-full py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 font-bold text-xs text-[#1c1917] transition cursor-pointer shadow-xs"
+            >
+              Got It
+            </button>
           </div>
         </div>
       )}

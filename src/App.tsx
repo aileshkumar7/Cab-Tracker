@@ -12,8 +12,15 @@ function MainApp() {
     return (
       <div className="min-h-screen bg-[#f8f6f0] text-[#1c1917] flex flex-col items-center justify-center p-4 font-sans">
         <div className="flex flex-col items-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/20 animate-pulse">
-            <Car className="w-8 h-8 text-white font-bold" />
+          <div className="w-16 h-16 rounded-2xl bg-[#1b2331] p-1 border-2 border-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/20 animate-pulse overflow-hidden">
+            <img
+              src="/icon-192.png"
+              alt="Cab Fleet Tracker"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/icon.svg';
+              }}
+            />
           </div>
           <div className="flex items-center gap-2 text-[#78716c] text-sm font-medium">
             <Loader2 className="w-4 h-4 animate-spin text-amber-600" />

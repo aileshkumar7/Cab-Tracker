@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="512" height="512" rx="108" fill="url(#bg-grad)"/>
+
+  <!-- Outer Ring Accent -->
+  <circle cx="256" cy="256" r="196" fill="none" stroke="url(#gold-grad)" stroke-width="8" opacity="0.3"/>
+
+  <!-- Main Glow Badge -->
+  <g filter="url(#shadow)">
+    <!-- Taxi Emblem Shield / Circle -->
+    <circle cx="256" cy="256" r="170" fill="url(#gold-grad)"/>
+    <circle cx="256" cy="256" r="158" fill="#1e293b"/>
+  </g>
+
+  <!-- Checkered Taxi Accent Band -->
+  <g opacity="0.85">
+    <rect x="176" y="160" width="20" height="14" fill="#fbbf24"/>
+    <rect x="196" y="160" width="20" height="14" fill="#0f172a"/>
+    <rect x="216" y="160" width="20" height="14" fill="#fbbf24"/>
+    <rect x="236" y="160" width="20" height="14" fill="#0f172a"/>
+    <rect x="256" y="160" width="20" height="14" fill="#fbbf24"/>
+    <rect x="276" y="160" width="20" height="14" fill="#0f172a"/>
+    <rect x="296" y="160" width="20" height="14" fill="#fbbf24"/>
+    <rect x="316" y="160" width="20" height="14" fill="#0f172a"/>
+  </g>
+
+  <!-- Taxi Roof Light Sign -->
+  <path d="M 226 190 L 286 190 L 280 205 L 232 205 Z" fill="#fbbf24" filter="url(#shadow)"/>
+  <rect x="238" y="193" width="36" height="8" rx="2" fill="#0f172a"/>
+
+  <!-- Sleek Modern Cab Vehicle Body -->
+  <!-- Roof / Windshield / Windows -->
+  <path d="M 190 265 L 215 215 L 297 215 L 322 265 Z" fill="#0f172a"/>
+  <path d="M 218 222 L 250 222 L 250 260 L 198 260 Z" fill="#94a3b8" opacity="0.9"/>
+  <path d="M 262 222 L 294 222 L 314 260 L 262 260 Z" fill="#94a3b8" opacity="0.9"/>
+
+  <!-- Main Chassis -->
+  <path d="M 152 265 C 152 265 170 262 256 262 C 342 262 360 265 360 265 C 372 268 376 278 376 295 L 376 332 C 376 340 370 346 362 346 L 350 346 C 342 346 336 340 336 332 L 336 324 L 176 324 L 176 332 C 176 340 170 346 162 346 L 150 346 C 142 346 136 340 136 332 L 136 295 C 136 278 140 268 152 265 Z" fill="#fbbf24"/>
+
+  <!-- Headlights -->
+  <ellipse cx="170" cy="285" rx="14" ry="8" fill="#ffffff" filter="url(#shadow)"/>
+  <ellipse cx="342" cy="285" rx="14" ry="8" fill="#ffffff" filter="url(#shadow)"/>
+
+  <!-- Grille -->
+  <rect x="220" y="280" width="72" height="20" rx="4" fill="#0f172a"/>
+  <line x1="228" y1="287" x2="284" y2="287" stroke="#fbbf24" stroke-width="2"/>
+  <line x1="228" y1="293" x2="284" y2="293" stroke="#fbbf24" stroke-width="2"/>
+
+  <!-- License Plate / Logo Badge -->
+  <rect x="236" y="306" width="40" height="12" rx="2" fill="#ffffff"/>
+  <text x="256" y="315" font-family="system-ui, sans-serif" font-weight="900" font-size="8" fill="#0f172a" text-anchor="middle">TAXI</text>
+
+  <!-- Under-Chassis Wheels Front -->
+  <rect x="156" y="336" width="32" height="10" rx="4" fill="#0f172a"/>
+  <rect x="324" y="336" width="32" height="10" rx="4" fill="#0f172a"/>
+
+  <!-- Bottom Brand Text -->
+  <text x="256" y="396" font-family="system-ui, sans-serif" font-weight="900" font-size="28" fill="#fbbf24" text-anchor="middle" letter-spacing="4">CAB DRIVER</text>
+</svg>
