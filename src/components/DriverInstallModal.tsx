@@ -78,7 +78,7 @@ export const DriverInstallModal: React.FC<DriverInstallModalProps> = ({ isOpen, 
 
   const handleWhatsAppShare = () => {
     const text = encodeURIComponent(
-      `🚕 *Cab Fleet Driver App Installation*\n\nPlease install the driver mobile app to punch your duty location and receive assignments:\n\n🔗 ${activeUrl}\n\n*Test Driver Accounts for Live Testing:*\n• Mobile 1 (Driver 1): driver1@fleet.com (Pass: Driver@12345) [Cab: KA-01-AB-1024]\n• Mobile 2 (Driver 2): driver2@fleet.com (Pass: Driver@12345) [Cab: KA-01-MG-5588]\n• Mobile 3 (Driver 3): driver3@fleet.com (Pass: Driver@12345) [Cab: KA-01-ET-9901]\n\n*Instructions:*\n1. Open link on phone in Chrome (Android) or Safari (iPhone)\n2. Tap "Add to Home screen" or "Install App"\n3. An icon labeled "Cab Driver" will appear on your phone home screen.\n4. Tap the icon daily to start your duty and punch GPS location.`
+      `🚕 *Cab Fleet Driver App Installation*\n\nPlease install the driver mobile app to punch your duty location and receive assignments:\n\n🔗 ${activeUrl}\n\n*Test Driver Accounts for Live Testing:*\n• Mobile 1 (Driver 1): driver1@fleet.com (Pass: Driver@12345) [Cab: KA-01-AB-1024]\n• Mobile 2 (Driver 2): driver2@fleet.com (Pass: Driver@12345) [Cab: KA-01-MG-5588]\n• Mobile 3 (Driver 3): driver3@fleet.com (Pass: Driver@12345) [Cab: KA-01-ET-9901]\n\n*Instructions:*\n1. Open link on phone in Chrome (Android) or Safari (iPhone)\n2. Tap "Add to Home screen" or "Install App"\n3. An icon labeled "Cab Track" will appear on your phone home screen.\n4. Tap the icon daily to start your duty and punch GPS location.`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
   };
@@ -226,7 +226,7 @@ export const DriverInstallModal: React.FC<DriverInstallModalProps> = ({ isOpen, 
               </span>
             </div>
             <p className="text-[11px] text-[#57534e] leading-snug mt-0.5">
-              Once installed, this golden <strong className="text-amber-800">Cab Driver</strong> icon will appear on the driver&apos;s phone screen so they can launch their shift with one tap every day.
+              Once installed, this golden <strong className="text-amber-800">Cab Track</strong> icon will appear on the driver&apos;s phone screen so they can launch their shift with one tap every day.
             </p>
           </div>
         </div>

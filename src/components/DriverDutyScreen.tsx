@@ -1369,7 +1369,7 @@ export const DriverDutyScreen: React.FC = () => {
             <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-md shadow-amber-500/20 shrink-0 border-2 border-amber-400/40 bg-[#1b2331] flex items-center justify-center p-1">
               <img
                 src="/icon-192.png"
-                alt="Cab Driver Logo"
+                alt="Cab Track Logo"
                 className="w-full h-full object-contain"
                 referrerPolicy="no-referrer"
                 onError={(e) => {
@@ -1477,7 +1477,7 @@ export const DriverDutyScreen: React.FC = () => {
               </div>
               <div>
                 <div className="text-sm font-bold text-[#1c1917] flex items-center gap-1.5">
-                  <span>Add Cab Driver to Phone</span>
+                  <span>Add Cab Track to Phone</span>
                 </div>
                 <div className="text-xs text-[#78716c]">Install with golden taxi logo launcher</div>
               </div>
@@ -2336,7 +2336,7 @@ export const DriverDutyScreen: React.FC = () => {
                 <div className="w-10 h-10 rounded-xl overflow-hidden bg-[#1b2331] p-0.5 border border-amber-400 shrink-0">
                   <img
                     src="/icon-192.png"
-                    alt="Cab Driver Logo"
+                    alt="Cab Track Logo"
                     className="w-full h-full object-contain"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src = '/icon.svg';
@@ -2345,7 +2345,7 @@ export const DriverDutyScreen: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-black text-[#1c1917]">Add to iPhone Screen</h3>
-                  <p className="text-[11px] text-[#78716c]">Display official Cab Driver icon</p>
+                  <p className="text-[11px] text-[#78716c]">Display official Cab Track icon</p>
                 </div>
               </div>
               <button
@@ -2381,7 +2381,7 @@ export const DriverDutyScreen: React.FC = () => {
                   3
                 </span>
                 <p className="leading-snug">
-                  Confirm the name <strong>Cab Driver</strong> and tap <strong>Add</strong> at top right. The golden taxi badge logo will now appear on your phone screen!
+                  Confirm the name <strong>Cab Track</strong> and tap <strong>Add</strong> at top right. The golden taxi badge logo will now appear on your phone screen!
                 </p>
               </div>
             </div>

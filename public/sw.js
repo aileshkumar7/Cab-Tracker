@@ -1,5 +1,5 @@
 // Service worker for PWA support & icon precaching
-const CACHE_NAME = 'cab-fleet-driver-v4';
+const CACHE_NAME = 'cab-track-v1';
 const ICON_ASSETS = [
   '/',
   '/manifest.json',

@@ -1,7 +1,7 @@
 {
-  "name": "Cab Fleet Tracker - Driver",
-  "short_name": "Cab Driver",
-  "description": "Mobile duty punch-in/out and hub reporting app for fleet drivers.",
+  "name": "Cab Track",
+  "short_name": "Cab Track",
+  "description": "Mobile duty punch-in/out and live GPS fleet tracking app for drivers and fleet managers.",
   "start_url": "/?role=driver",
   "scope": "/",
   "id": "/",
